@@ -1,0 +1,15 @@
+services:
+  homepod-temp-logger:
+    build: .
+    # Or use the prebuilt image instead of building:
+    # image: ghcr.io/gregbny/homepod-temp-logger:latest
+    container_name: homepod-temp-logger
+    restart: unless-stopped
+    ports:
+      - "8088:8088"          # host:container — the POST URL is http://SERVER_IP:8088
+    volumes:
+      - ./data:/data         # .db persistence (on Unraid: /mnt/user/appdata/homepod-temp-logger)
+    environment:
+      PORT: "8088"
+      DB_PATH: "/data/homepod.db"
+      RETENTION_DAYS: "0"    # 0 = unlimited history; e.g. 365 to prune beyond a year

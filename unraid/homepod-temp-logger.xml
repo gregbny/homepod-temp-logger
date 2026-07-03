@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>homepod-temp-logger</Name>
+  <Repository>ghcr.io/gregbny/homepod-temp-logger:latest</Repository>
+  <Registry>https://github.com/gregbny/homepod-temp-logger/pkgs/container/homepod-temp-logger</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/gregbny/homepod-temp-logger/issues</Support>
+  <Project>https://github.com/gregbny/homepod-temp-logger</Project>
+  <Overview>Continuously log temperature and humidity from your HomePod (mini) speakers and browse the history from any browser as an installable PWA. Local-only (LAN), tiny stack (FastAPI + SQLite). The iOS Shortcut POSTs readings to /api/readings; this container stores them in SQLite and serves the dashboard.</Overview>
+  <Category>HomeAutomation: Tools: Status:Stable</Category>
+  <WebUI>http://[IP]:[PORT:8088]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/gregbny/homepod-temp-logger/main/server/static/icon-192.png</Icon>
+  <ExtraParams/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Description>HomePod temperature &amp; humidity logger + dashboard (PWA). POST endpoint at /api/readings, dashboard at /.</Description>
+
+  <Config Name="WebUI Port" Target="8088" Default="8088" Mode="tcp" Description="Dashboard / API port" Type="Port" Display="always" Required="true" Mask="false">8088</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/homepod-temp-logger" Mode="rw" Description="SQLite database (persistent)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/homepod-temp-logger</Config>
+  <Config Name="PORT" Target="PORT" Default="8088" Mode="" Description="Listen port inside the container (match the WebUI port)" Type="Variable" Display="advanced" Required="true" Mask="false">8088</Config>
+  <Config Name="DB_PATH" Target="DB_PATH" Default="/data/homepod.db" Mode="" Description="SQLite file path inside the container" Type="Variable" Display="advanced" Required="true" Mask="false">/data/homepod.db</Config>
+  <Config Name="RETENTION_DAYS" Target="RETENTION_DAYS" Default="0" Mode="" Description="0 = keep everything; N = prune readings older than N days at startup" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+</Container>

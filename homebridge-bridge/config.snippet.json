@@ -1,0 +1,12 @@
+{
+  "_comment": "Merge this into the 'accessories' section of your Homebridge config.json. Requires the homebridge-dummy plugin (Homebridge UI > Plugins > search 'Dummy').",
+  "accessories": [
+    {
+      "accessory": "DummySwitch",
+      "name": "HomePod Logger Trigger",
+      "reverse": false,
+      "time": 1000,
+      "resettable": true
+    }
+  ]
+}

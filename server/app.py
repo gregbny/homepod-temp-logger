@@ -3,7 +3,7 @@
 Minimal stack: FastAPI + SQLite (stdlib). No heavy dependencies, no outbound
 internet access. Everything stays local (LAN).
 
-Payload contract (fixed):
+Payload contract:
     POST /api/readings
     {
       "homepod": "living-room", "temp": 24.3, "humidity": 52.0,
@@ -11,11 +11,16 @@ Payload contract (fixed):
     }
   or batch:
     { "readings": [ {…}, {…} ] }
+
+``temp`` and ``humidity`` may be plain numbers OR strings as HomePods emit
+them, e.g. "21,4°C" / "52,0 %" (decimal comma and unit are tolerated). Send
+such values quoted, since a bare comma is invalid JSON.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
@@ -98,11 +103,40 @@ def prune_old() -> None:
 # --------------------------------------------------------------------------- #
 # Input schema
 # --------------------------------------------------------------------------- #
+# First number in a string, tolerating a decimal comma (e.g. "21,4°C" -> 21.4).
+_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
+
+
+def _coerce_number(v: object) -> float:
+    """Parse a temperature/humidity value the way HomePods actually emit it.
+
+    HomePods report localized strings such as ``"21,4°C"`` or ``"52,0 %"``.
+    Accept plain numbers, but also strings with a decimal comma and/or a
+    trailing unit (``°C``, ``%``, …) so the iOS Shortcut can forward the raw
+    value without pre-formatting it.
+    """
+    if isinstance(v, bool):  # bool is an int subclass; reject it explicitly.
+        raise ValueError("expected a number, got a boolean")
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        s = v.strip().replace(",", ".")
+        m = _NUMBER_RE.search(s)
+        if m:
+            return float(m.group())
+    raise ValueError(f"could not parse a number from {v!r}")
+
+
 class Reading(BaseModel):
     homepod: str = Field(min_length=1, max_length=64)
     temp: float
     humidity: float
     timestamp: Optional[str] = None
+
+    @field_validator("temp", "humidity", mode="before")
+    @classmethod
+    def _parse_number(cls, v: object) -> float:
+        return _coerce_number(v)
 
     @field_validator("temp")
     @classmethod

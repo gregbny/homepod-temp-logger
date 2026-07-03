@@ -324,7 +324,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v1";
+const CACHE = "homepod-logger-v2";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -492,7 +492,12 @@ INDEX_HTML = r"""<!doctype html>
   .legend .item .lbl { font-weight:600; color:var(--text-1); }
   .legend .item .stat { color:var(--muted); font-variant-numeric:tabular-nums; }
   .chart-wrap { position:relative; height:280px; }
-  @media (max-width:500px){ .chart-wrap { height:240px; } }
+  @media (max-width:500px){
+    .chart-wrap { height:240px; }
+    /* Reclaim horizontal space so the charts are wider on phones. */
+    body { padding-left:10px; padding-right:10px; }
+    .card { padding:14px 10px; }
+  }
 
   .status-line { font-size:.74rem; color:var(--muted); text-align:center; margin-top:4px; }
   .ios-hint {
@@ -653,23 +658,26 @@ function baseConfig(fmt, unit) {
       scales: {
         x: {
           type: "linear",
-          grid: { color: css("--grid"), drawTicks: false },
-          border: { color: css("--baseline") },
-          ticks: { color: css("--muted"), maxRotation: 0, autoSkip: true,
+          // Colors are scriptable (re-read each render) so a light/dark theme
+          // switch is always reflected — otherwise the grid keeps the value it
+          // had when the chart was built (a light grid looks white on dark).
+          grid: { color: () => css("--grid"), drawTicks: false },
+          border: { color: () => css("--baseline") },
+          ticks: { color: () => css("--muted"), maxRotation: 0, autoSkip: true,
                    maxTicksLimit: 7, font: { size: 11 }, callback: adaptTick }
         },
         y: {
-          grid: { color: css("--grid"), drawTicks: false },
+          grid: { color: () => css("--grid"), drawTicks: false },
           border: { display: false },
-          ticks: { color: css("--muted"), font: { size: 11 },
+          ticks: { color: () => css("--muted"), font: { size: 11 },
                    callback: (v) => v + unit }
         }
       },
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: css("--surface"), titleColor: css("--text-2"),
-          bodyColor: css("--text-1"), borderColor: css("--border"), borderWidth: 1,
+          backgroundColor: () => css("--surface"), titleColor: () => css("--text-2"),
+          bodyColor: () => css("--text-1"), borderColor: () => css("--border"), borderWidth: 1,
           padding: 10, cornerRadius: 10, displayColors: true, usePointStyle: true,
           callbacks: {
             title: (it) => new Date(it[0].parsed.x).toLocaleString([],
@@ -746,6 +754,18 @@ function setRange(r, btn) {
 window.addEventListener("DOMContentLoaded", () => {
   tempChart = new Chart(document.getElementById("tempChart"), baseConfig(fmtT, "°"));
   humChart = new Chart(document.getElementById("humChart"), baseConfig(fmtH, "%"));
+
+  // Touch: show the tooltip only while a finger is down, then dismiss it —
+  // otherwise the panel sticks around after a tap and eats the screen.
+  const dismiss = (ch) => {
+    ch.setActiveElements([]);
+    if (ch.tooltip) ch.tooltip.setActiveElements([], { x: 0, y: 0 });
+    ch.update();
+  };
+  [tempChart, humChart].forEach((ch) => {
+    ch.canvas.addEventListener("touchend", () => dismiss(ch), { passive: true });
+    ch.canvas.addEventListener("touchcancel", () => dismiss(ch), { passive: true });
+  });
 
   document.querySelectorAll("#ranges button").forEach((btn) =>
     btn.addEventListener("click", () => setRange(btn.dataset.range, btn)));

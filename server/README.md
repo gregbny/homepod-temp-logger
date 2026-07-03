@@ -37,8 +37,12 @@ Batch (recommended, to send both HomePods in one POST):
 
 - **Idempotent**: an identical `(homepod, timestamp)` pair is never duplicated
   (upsert). Replaying a POST is safe.
+- **Localized values**: `temp`/`humidity` may be plain numbers **or** strings as
+  HomePods emit them — e.g. `"temp": "21,4°C"`, `"humidity": "52,0 %"` (decimal comma
+  and trailing unit are stripped). Send such values **quoted**, since a bare comma is
+  invalid JSON.
 - **Validation**: `400` if `temp` is outside `[-40, 80]`, `humidity` outside
-  `[0, 100]`, or `timestamp` isn't parseable.
+  `[0, 100]`, the value isn't a parseable number, or `timestamp` isn't parseable.
 - **200** response: `{ "status": "ok", "received": N, "stored": N }`.
 
 ### `GET /api/series?range=24h|7d|30d|all`

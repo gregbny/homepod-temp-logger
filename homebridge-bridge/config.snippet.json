@@ -1,12 +1,22 @@
 {
-  "_comment": "Merge this into the 'accessories' section of your Homebridge config.json. Requires the homebridge-dummy plugin (Homebridge UI > Plugins > search 'Dummy').",
+  "_comment": "Don't hand-write this. Install the Homebridge Dummy plugin, open its config UI (the wrench/Settings on the plugin card) and add a momentary switch named 'HomePod Logger Trigger' with a 1-second auto-reset. The UI writes a 'platforms' block like the one below. If you enable 'Child Bridge' in the UI, Homebridge also adds a per-install '_bridge' section (username/port) automatically — leave whatever it generates untouched. The older accessory form ({\"accessory\":\"DummySwitch\",...}) did NOT expose a usable momentary switch here; use the platform form below.",
+  "platform": "HomebridgeDummy",
+  "name": "HomePod Logger Trigger",
   "accessories": [
     {
-      "accessory": "DummySwitch",
       "name": "HomePod Logger Trigger",
-      "reverse": false,
-      "time": 1000,
-      "resettable": true
+      "type": "Switch",
+      "protocol": "HomeKit",
+      "autoReset": {
+        "type": "TIMEOUT",
+        "time": 1,
+        "units": "SECONDS",
+        "random": false
+      },
+      "resetOnRestart": false,
+      "disableLogging": false,
+      "enableHistory": false,
+      "enableWebhook": false
     }
   ]
 }

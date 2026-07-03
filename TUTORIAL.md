@@ -71,17 +71,24 @@ a `docker-compose.yml` you can build locally with Unraid's Compose Manager.)*
 
 ## Step 2 — Create the iOS Shortcut
 
-Full illustrated steps are in [`ios-setup/README.md`](ios-setup/README.md). In short,
-build a Shortcut named **`HomePod Logger`** that:
+> Heads-up: this is the fiddly, all-manual part — Apple lets you import nothing, and
+> you'll hand-build it. Full illustrated steps + workarounds are in
+> [`ios-setup/README.md`](ios-setup/README.md). Overview:
 
-1. Reads, via **Get State of Home Accessory** actions: temp + humidity of HomePod 1,
-   then HomePod 2 (store each in a variable).
-2. Assembles the batch JSON (payload contract) in a **Text** action.
+Build a Shortcut named **`HomePod Logger`** (in the **Shortcuts** app) that:
+
+1. Reads, via **Get State of Home Accessory** actions, temp + humidity of HomePod 1
+   then HomePod 2, each into a **named variable** (`t1`,`h1`,`t2`,`h2` — variables are
+   required, not optional).
+2. Assembles the batch JSON in a **Text** action, with the values **quoted**:
+   `{"readings":[{"homepod":"living-room","temp":"⟨t1⟩","humidity":"⟨h1⟩"}, …]}`.
+   Quoting matters — the server accepts HomePod's localized `"21,4°C"` / `"52,0 %"`
+   (comma + unit) as long as they're strings, so you don't reformat anything.
 3. **Gets Contents of URL** → `http://SERVER_IP:8088/api/readings`, method `POST`,
-   header `Content-Type: application/json`, body = the JSON text.
+   header `Content-Type: application/json`, body = the JSON text variable.
 
 **Test it:** run the Shortcut once (▶). A new reading for both rooms should appear on
-the dashboard. ✅ The read→POST path works.
+the dashboard. ✅ The read→POST path works. (You'll reuse these pieces in Step 4.)
 
 ---
 
@@ -91,16 +98,17 @@ Full steps in [`homebridge-bridge/README.md`](homebridge-bridge/README.md).
 
 ### 3a. The switch
 
-Homebridge UI → **Plugins** → install **homebridge-dummy**. Add to your `config.json`
-`accessories`:
+Homebridge UI → **Plugins** → install the **Dummy** plugin → open its **config UI**
+(the wrench) and add a **momentary switch** named `HomePod Logger Trigger` with a
+**1-second auto-reset**. The UI writes a `platforms` block (`"platform":
+"HomebridgeDummy"`) — see [`homebridge-bridge/config.snippet.json`](homebridge-bridge/config.snippet.json).
+Restart Homebridge. The auto-reset makes it **momentary** (returns to off by itself),
+so each toggle fires a clean "turned on" event.
 
-```json
-{ "accessory": "DummySwitch", "name": "HomePod Logger Trigger",
-  "reverse": false, "time": 1000, "resettable": true }
-```
-
-Restart Homebridge. `resettable: true` makes it a **momentary** switch (auto-returns
-to off), so each toggle fires a clean "turned on" event.
+> Two easy-to-miss steps: after this you must **pair the switch into the Home app**
+> (scan the Homebridge/child-bridge QR) **and expose it as a Lamp** (a plain Switch
+> often isn't selectable as an automation trigger). Both are in
+> [`homebridge-bridge/README.md`](homebridge-bridge/README.md) steps 1b–1c.
 
 ### 3b. The hourly cron
 
@@ -126,13 +134,17 @@ flip on (briefly) in Homebridge UI / the Home app. ✅ The cron→switch path wo
 
 ## Step 4 — Wire the Home app automation (the autonomous bit)
 
-This is the key step and it must be in the **Home** app, not Shortcuts. Full steps in
-[`ios-setup/README.md`](ios-setup/README.md#b-the-automation-home-app--important).
+This is the key step and it must be in the **Home** app, not Shortcuts — and it's the
+most awkward one. Full steps + workarounds in
+[`ios-setup/README.md`](ios-setup/README.md#b-make-it-autonomous-home-app--the-tedious-bit).
 
 - **Home** app → **Automation** → **+** → **An Accessory is Controlled** →
-  `HomePod Logger Trigger` → **Turns On**.
-- Action: scroll down → **Convert to Shortcut** → add **Run Shortcut** → pick
-  `HomePod Logger`. Done.
+  `HomePod Logger Trigger` (visible because it's exposed as a Lamp) → **Turns On**.
+- Action: scroll down → **Convert to Shortcut**. You usually **can't** just pick your
+  existing `HomePod Logger` shortcut, so rebuild the actions here. The catch: this
+  editor **won't insert variables**, so **copy the JSON Text action from the Shortcuts
+  app** (long-press → Copy) and **paste** it into this automation. Wire it as the POST
+  body. Done.
 
 Because this automation lives on the **HomePod hub**, it runs with no iPhone
 involved.
@@ -168,6 +180,9 @@ From now on you get one reading per HomePod every hour, forever, with no interac
 |---|---|
 | Dashboard loads but stays empty | No readings yet. Run the `curl` test (Step 1b) or the Shortcut (Step 2). |
 | Shortcut fails at the POST | Wrong `SERVER_IP`/port, or malformed JSON. The server returns `400` with a detail message — read it. Check the phone is on the same LAN. |
+| `400` on temperature like `21,4` | Send the value **quoted** (`"21,4°C"`). A bare comma is invalid JSON; a quoted string is accepted and the comma/unit are stripped server-side. |
+| Switch not offered as an automation trigger | Expose the dummy as a **Lamp**, not a Switch (Homebridge README step 1c), and make sure it's **paired into Home** (step 1b). |
+| Can't insert variables in the Home automation | Expected — the Home editor can't. Build the JSON **Text** action in the **Shortcuts** app and **copy-paste** it into the automation. |
 | Home automation never runs the Shortcut | You created it in **Shortcuts**, not **Home**. Recreate it under Home → Automation → *An Accessory is Controlled*. |
 | First automation run asks to confirm the Shortcut | iOS confirmation prompt. Approve once; in Shortcuts settings disable the confirmation for this Shortcut if the option exists. |
 | Tiles turn red / "x h ago" grows | No recent reading (older than 2h) — the cron or a link in the chain stopped. Re-test Step 3b, then Step 5. |

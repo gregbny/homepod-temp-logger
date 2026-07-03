@@ -18,24 +18,45 @@ running on the HomePod hub.
 
 ## 1. Install the virtual switch
 
-1. Homebridge UI → **Plugins** → search **`homebridge-dummy`** → install.
-2. Homebridge UI → **Config** (JSON mode) → add the block from `config.snippet.json`
-   to `accessories`:
-   ```json
-   {
-     "accessory": "DummySwitch",
-     "name": "HomePod Logger Trigger",
-     "reverse": false,
-     "time": 1000,
-     "resettable": true
-   }
-   ```
-   - `resettable: true` + `time: 1000` make it a **momentary** switch: it returns to
-     *off* by itself after 1s. Each toggle therefore fires a clean "turned on" event
-     for the Home automation.
-3. **Restart Homebridge.** The `HomePod Logger Trigger` accessory appears in
-   Homebridge UI and becomes exposable to the Home app (via the bridge's HomeKit
-   code).
+1. Homebridge UI → **Plugins** → search for the **Dummy** plugin → install.
+2. On the plugin card, click the **wrench / Settings** to open its **config UI** (do
+   **not** hand-edit JSON — let the UI generate the block). Add an accessory:
+   - **Name**: `HomePod Logger Trigger`
+   - **Type**: `Switch`
+   - **Auto Reset**: enabled, `1 second` (TIMEOUT) → this makes it a **momentary**
+     switch that returns to *off* by itself after 1s, so each toggle fires a clean
+     "turned on" event for the Home automation.
+   - Leave history/webhook off.
+
+   The UI writes a `platforms` block like [`config.snippet.json`](config.snippet.json)
+   (`"platform": "HomebridgeDummy"`). **Heads-up:** the older accessory form
+   (`{"accessory":"DummySwitch", …}`) does **not** produce a usable momentary switch
+   here — use the platform form the config UI generates.
+3. *(Optional but recommended)* enable **Child Bridge** for this plugin in the UI.
+   Homebridge adds a `_bridge` section (its own `username`/`port`) automatically —
+   leave whatever it generates.
+4. **Restart Homebridge.**
+
+### 1b. Pair it into the Home app (don't skip this)
+
+Homebridge running the accessory is **not** enough — HomeKit won't see the switch
+until the bridge is paired:
+
+1. Homebridge UI → **Status** page → the QR code (or the setup code / PIN). If you
+   enabled a child bridge in step 3, use **that** bridge's QR (each child bridge has
+   its own).
+2. **Home** app → **+** → **Add Accessory** → scan the QR (or *More options…* → pick
+   the bridge → enter the PIN). Assign it to any room.
+3. `HomePod Logger Trigger` now appears in the Home app.
+
+### 1c. Make it selectable for automations (expose it as a *Lamp*)
+
+A plain **Switch** is often **not offered** as a trigger under Home → Automation →
+*An Accessory is Controlled*. Exposing the dummy as a **Lightbulb / Lamp** fixes this.
+In the Dummy plugin's config UI, set the accessory's service **type to `Lightbulb`
+(Lamp)** instead of `Switch`, then restart Homebridge and re-check the Home app — the
+accessory now shows as a light and becomes selectable in the automation trigger list.
+(Cosmetic-only: it behaves the same; you can hide it later — see step 4c.)
 
 ## 2. Find your Homebridge API details
 
@@ -68,20 +89,32 @@ off.
 
 ## 4. Install the hourly cron (Unraid)
 
+> **Getting `trigger.py` onto the server.** The container image does **not** drop
+> this file into `appdata` for you — it lives in this repo. The script below
+> **auto-downloads it on first run** into `/mnt/user/appdata/homepod-temp-logger/`,
+> so you don't have to copy anything by hand. (Prefer to place it manually? On the
+> Unraid terminal: `mkdir -p /mnt/user/appdata/homepod-temp-logger && curl -fsSL
+> https://raw.githubusercontent.com/gregbny/homepod-temp-logger/main/homebridge-bridge/trigger.py
+> -o /mnt/user/appdata/homepod-temp-logger/trigger.py`.)
+
 ### Option A — User Scripts plugin (recommended)
 1. Apps → install **User Scripts** (Community Apps) if missing.
 2. Settings → **User Scripts** → *Add New Script* → name it `homepod-trigger`.
-3. Edit the script:
+3. Edit the script (self-contained — fetches `trigger.py` if it's not there yet):
    ```bash
    #!/bin/bash
    export HB_URL="http://192.168.1.75:8581"
    export HB_USER="admin"
    export HB_PASS="your-password"
    export HB_SWITCH_NAME="HomePod Logger Trigger"
-   python3 /mnt/user/appdata/homepod-temp-logger/trigger.py
+
+   SCRIPT=/mnt/user/appdata/homepod-temp-logger/trigger.py
+   if [ ! -f "$SCRIPT" ]; then
+     mkdir -p "$(dirname "$SCRIPT")"
+     curl -fsSL https://raw.githubusercontent.com/gregbny/homepod-temp-logger/main/homebridge-bridge/trigger.py -o "$SCRIPT"
+   fi
+   python3 "$SCRIPT"
    ```
-   (Copy `trigger.py` to a stable path on the array, e.g.
-   `/mnt/user/appdata/homepod-temp-logger/trigger.py`.)
 4. *Schedule* → **Custom** → hourly cron expression:
    ```
    0 * * * *

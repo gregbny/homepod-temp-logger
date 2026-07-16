@@ -336,6 +336,7 @@ async def ingest(payload: dict) -> JSONResponse:
 # --------------------------------------------------------------------------- #
 RANGES = {
     "24h": timedelta(hours=24),
+    "3d": timedelta(days=3),
     "7d": timedelta(days=7),
     "30d": timedelta(days=30),
     "all": None,
@@ -466,7 +467,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v3";
+const CACHE = "homepod-logger-v4";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -644,6 +645,7 @@ INDEX_HTML = r"""<!doctype html>
     padding:16px; margin-bottom:16px; box-shadow:var(--shadow); min-width:0;
   }
   .card h2 { font-size:.95rem; margin:0 0 2px; font-weight:600; }
+  .card .sub { font-size:.74rem; color:var(--muted); }
   .legend { display:flex; flex-wrap:wrap; gap:14px 18px; margin:10px 0 14px; }
   .legend .item { display:flex; align-items:center; gap:8px; font-size:.78rem; }
   .legend .item .lbl { font-weight:600; color:var(--text-1); }
@@ -655,6 +657,18 @@ INDEX_HTML = r"""<!doctype html>
     body { padding-left:10px; padding-right:10px; }
     .card { padding:14px 10px; }
   }
+
+  /* Daily-average chips ---------------------------------------------------- */
+  .days { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .day {
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+    padding:8px 6px 7px; border-radius:10px; border:1px solid var(--border);
+    min-width:52px; flex:0 0 auto;
+  }
+  .day.today { border-color:var(--baseline); }
+  .day .d { font-size:.66rem; color:var(--muted); white-space:nowrap; }
+  .day .t { font-size:.95rem; font-weight:650; font-variant-numeric:tabular-nums; }
+  .day .bar { width:26px; height:4px; border-radius:2px; }
 
   .status-line { font-size:.74rem; color:var(--muted); text-align:center; margin-top:4px; }
   .ios-hint {
@@ -685,9 +699,14 @@ INDEX_HTML = r"""<!doctype html>
 <div class="controls">
   <div class="ranges" id="ranges">
     <button data-range="24h" class="active">24h</button>
+    <button data-range="3d">3d</button>
     <button data-range="7d">7d</button>
     <button data-range="30d">30d</button>
     <button data-range="all">All</button>
+  </div>
+  <div class="ranges" id="modes">
+    <button data-mode="pods">Pods</button>
+    <button data-mode="avg">Average</button>
   </div>
   <label class="wx-toggle" id="wxToggle">
     <input type="checkbox" id="wx" checked>
@@ -705,17 +724,31 @@ INDEX_HTML = r"""<!doctype html>
   <div class="legend" id="legendHum"></div>
   <div class="chart-wrap"><canvas id="humChart"></canvas></div>
 </div>
+<div class="card">
+  <h2>Today vs yesterday</h2>
+  <div class="sub">Apartment average temperature, by time of day</div>
+  <div class="legend" id="legendCmp"></div>
+  <div class="chart-wrap"><canvas id="cmpChart"></canvas></div>
+</div>
+<div class="card" id="dailyCard" style="display:none">
+  <h2>Daily average</h2>
+  <div class="sub">Apartment mean temperature, one figure per day</div>
+  <div class="days" id="days"></div>
+</div>
 
 <p class="status-line" id="status">Loading…</p>
 
 <script>
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const SERIES_VARS = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
+const HOUR = 3600e3;
 let currentRange = "24h";
 let colorMap = {};           // homepod -> color (follows the entity, never rank)
-let tempChart, humChart, timer = null;
+let tempChart, humChart, cmpChart, timer = null;
 // Outdoor-weather overlay is on unless the user unticked it (persisted).
 let showWeather = localStorage.getItem("showWeather") !== "0";
+// What the main charts plot: each pod, or the apartment average (persisted).
+let displayMode = localStorage.getItem("displayMode") === "avg" ? "avg" : "pods";
 
 const fmtT = (v) => v.toFixed(1) + "°";
 const fmtH = (v) => Math.round(v) + "%";
@@ -782,7 +815,7 @@ const endLabel = {
   afterDatasetsDraw(chart) {
     const { ctx } = chart;
     chart.data.datasets.forEach((ds, i) => {
-      if (ds._weather) return;               // outdoor backdrop: no end label
+      if (!ds._fmt) return;                  // reference series: no end label
       const meta = chart.getDatasetMeta(i);
       if (meta.hidden || !meta.data.length) return;
       const p = meta.data[meta.data.length - 1];
@@ -815,11 +848,40 @@ const crosshair = {
   }
 };
 
+// Fixed, hour-aligned x windows on the short ranges so the axis reads the same
+// whenever you open the app, instead of drifting with the newest reading.
+function xBounds() {
+  const spanH = { "24h": 24, "3d": 72 }[currentRange];
+  if (!spanH) return { min: undefined, max: undefined };
+  const max = Math.ceil(Date.now() / HOUR) * HOUR;
+  return { min: max - spanH * HOUR, max };
+}
+
+// Fixed local-time ticks: 24h → every 3h, 3d → every 12h, 7d → every midnight.
+// 30d/all keep Chart.js's data-driven ticks. Date arithmetic is DST-safe.
+function fixedTicks(min, max) {
+  const stepH = { "24h": 3, "3d": 12, "7d": 24 }[currentRange];
+  if (!stepH || min == null || max == null) return null;
+  const d = new Date(min);
+  d.setMinutes(0, 0, 0);
+  d.setHours(d.getHours() - (d.getHours() % stepH));
+  const out = [];
+  while (d.getTime() <= max) {
+    if (d.getTime() >= min) out.push({ value: d.getTime() });
+    d.setHours(d.getHours() + stepH);
+  }
+  return out;
+}
+
 function baseConfig(fmt, unit) {
   const adaptTick = (v) => {
     const d = new Date(v);
     if (currentRange === "24h")
       return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (currentRange === "3d")
+      return d.getHours() === 0
+        ? d.toLocaleDateString([], { weekday: "short", day: "2-digit" })
+        : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     return d.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
   };
   return {
@@ -832,13 +894,17 @@ function baseConfig(fmt, unit) {
       scales: {
         x: {
           type: "linear",
+          afterBuildTicks(axis) {
+            const t = fixedTicks(axis.min, axis.max);
+            if (t) axis.ticks = t;
+          },
           // Colors are scriptable (re-read each render) so a light/dark theme
           // switch is always reflected — otherwise the grid keeps the value it
           // had when the chart was built (a light grid looks white on dark).
           grid: { color: () => css("--grid"), drawTicks: false },
           border: { color: () => css("--baseline") },
           ticks: { color: () => css("--muted"), maxRotation: 0, autoSkip: true,
-                   maxTicksLimit: 7, font: { size: 11 }, callback: adaptTick }
+                   maxTicksLimit: 9, font: { size: 11 }, callback: adaptTick }
         },
         y: {
           grid: { color: () => css("--grid"), drawTicks: false },
@@ -865,15 +931,39 @@ function baseConfig(fmt, unit) {
   };
 }
 
-function datasets(data, homepods, field, fmt) {
-  return homepods.map((name) => ({
-    label: name,
-    data: data[name].map((p) => ({ x: p.x, y: p[field] })),
-    _fmt: fmt,
-    borderColor: colorMap[name], backgroundColor: colorMap[name],
+function lineDataset(label, color, points, fmt) {
+  return {
+    label, data: points, _fmt: fmt,
+    borderColor: color, backgroundColor: color,
     tension: .25, borderWidth: 2, pointRadius: 0, pointHoverRadius: 5,
     pointHoverBorderColor: css("--surface"), pointHoverBorderWidth: 2, spanGaps: true
+  };
+}
+
+// Apartment average: bucket to the hour (the ingest cadence), average each pod
+// within its bucket first, then average across pods — so a pod that reported
+// twice in an hour doesn't weigh more than the other.
+function averageSeries(data, homepods, field) {
+  const buckets = new Map();               // hour -> { pod: [values] }
+  homepods.forEach((name) => (data[name] || []).forEach((p) => {
+    const k = Math.round(p.x / HOUR) * HOUR;
+    const m = buckets.get(k) || {};
+    (m[name] = m[name] || []).push(p[field]);
+    buckets.set(k, m);
   }));
+  return [...buckets.keys()].sort((a, b) => a - b).map((k) => {
+    const pods = Object.values(buckets.get(k))
+      .map((v) => v.reduce((a, c) => a + c, 0) / v.length);
+    return { x: k, y: pods.reduce((a, c) => a + c, 0) / pods.length };
+  });
+}
+
+function datasets(data, homepods, field, fmt) {
+  if (displayMode === "avg")
+    return [lineDataset("Average", css("--s1"),
+                        averageSeries(data, homepods, field), fmt)];
+  return homepods.map((name) => lineDataset(
+    name, colorMap[name], data[name].map((p) => ({ x: p.x, y: p[field] })), fmt));
 }
 
 // Outdoor weather as a recessive gray area *behind* the indoor lines. It is
@@ -894,27 +984,168 @@ function weatherDataset(weather, field) {
 }
 
 function renderLegend(elId, data, homepods, field, fmt) {
-  document.getElementById(elId).innerHTML = homepods.map((name) => {
-    const vals = data[name].map((p) => p[field]);
-    const mn = Math.min(...vals), mx = Math.max(...vals);
-    const av = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return `<span class="item">
-      <span class="dot" style="background:${colorMap[name]}"></span>
-      <span class="lbl">${name}</span>
-      <span class="stat">${fmt(mn)} – ${fmt(mx)} · avg ${fmt(av)}</span>
-    </span>`;
-  }).join("");
+  const items = displayMode === "avg"
+    ? [{ name: "Average", color: css("--s1"),
+         vals: averageSeries(data, homepods, field).map((p) => p.y) }]
+    : homepods.map((name) => ({ name, color: colorMap[name],
+                                vals: data[name].map((p) => p[field]) }));
+  document.getElementById(elId).innerHTML = items.filter((i) => i.vals.length)
+    .map(({ name, color, vals }) => {
+      const mn = Math.min(...vals), mx = Math.max(...vals);
+      const av = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return `<span class="item">
+        <span class="dot" style="background:${color}"></span>
+        <span class="lbl">${name}</span>
+        <span class="stat">${fmt(mn)} – ${fmt(mx)} · avg ${fmt(av)}</span>
+      </span>`;
+    }).join("");
+}
+
+// --- "Today vs yesterday" — both days on a shared time-of-day axis ---------- //
+const fmtHour = (v) => String(Math.round(v / HOUR)).padStart(2, "0") + ":00";
+
+function cmpConfig() {
+  return {
+    type: "line",
+    data: { datasets: [] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      layout: { padding: { right: 44 } },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: {
+          type: "linear", min: 0, max: 24 * HOUR,
+          grid: { color: () => css("--grid"), drawTicks: false },
+          border: { color: () => css("--baseline") },
+          ticks: { color: () => css("--muted"), maxRotation: 0, autoSkip: true,
+                   maxTicksLimit: 9, stepSize: 3 * HOUR, font: { size: 11 },
+                   callback: fmtHour }
+        },
+        y: {
+          grid: { color: () => css("--grid"), drawTicks: false },
+          border: { display: false },
+          ticks: { color: () => css("--muted"), font: { size: 11 },
+                   callback: (v) => v + "°" }
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: () => css("--surface"), titleColor: () => css("--text-2"),
+          bodyColor: () => css("--text-1"), borderColor: () => css("--border"), borderWidth: 1,
+          padding: 10, cornerRadius: 10, displayColors: true, usePointStyle: true,
+          callbacks: {
+            title: (it) => fmtHour(it[0].parsed.x),
+            label: (it) => "  " + it.dataset.label + ": " + fmtT(it.parsed.y)
+          }
+        }
+      }
+    },
+    plugins: [endLabel, crosshair]
+  };
+}
+
+// Split the last 48h of apartment-average temperature into today / yesterday,
+// re-based to milliseconds since each day's local midnight.
+function compareSeries(ser3) {
+  const avg = averageSeries(ser3.data, ser3.homepods, "temp");
+  const mid = new Date(); mid.setHours(0, 0, 0, 0);
+  const t0 = mid.getTime();
+  const ym = new Date(mid); ym.setDate(ym.getDate() - 1);
+  const y0 = ym.getTime();
+  const today = [], yest = [];
+  avg.forEach((p) => {
+    if (p.x >= t0) today.push({ x: p.x - t0, y: p.y });
+    else if (p.x >= y0) yest.push({ x: p.x - y0, y: p.y });
+  });
+  return { today, yest };
+}
+
+function renderCompare(ser3) {
+  const { today, yest } = compareSeries(ser3);
+  cmpChart.data.datasets = [
+    lineDataset("Today", css("--s1"), today, fmtT),
+    { label: "Yesterday", data: yest,
+      borderColor: css("--muted"), backgroundColor: css("--muted"),
+      borderWidth: 1.5, borderDash: [5, 4], tension: .25,
+      pointRadius: 0, pointHoverRadius: 4, spanGaps: true, order: 5 }
+  ];
+  cmpChart.update();
+
+  const el = document.getElementById("legendCmp");
+  if (!today.length || !yest.length) {
+    el.innerHTML = '<span class="item"><span class="stat">Needs data for both today and yesterday.</span></span>';
+    return;
+  }
+  const mean = (a) => a.reduce((s, p) => s + p.y, 0) / a.length;
+  // Fair Δ: compare today with yesterday *up to the same time of day*.
+  const nowX = today[today.length - 1].x;
+  const yestSoFar = yest.filter((p) => p.x <= nowX);
+  const ref = yestSoFar.length ? yestSoFar : yest;
+  const d = mean(today) - mean(ref);
+  el.innerHTML = `
+    <span class="item"><span class="dot" style="background:${css("--s1")}"></span>
+      <span class="lbl">Today</span><span class="stat">avg ${fmtT(mean(today))}</span></span>
+    <span class="item"><span class="dot" style="background:${css("--muted")}"></span>
+      <span class="lbl">Yesterday</span><span class="stat">avg ${fmtT(mean(ref))} to this hour</span></span>
+    <span class="item"><span class="lbl">Δ</span>
+      <span class="stat">${d >= 0 ? "+" : "−"}${Math.abs(d).toFixed(1)}° vs same hours yesterday</span></span>`;
+}
+
+// --- Daily-average history — one figure per day ------------------------------ //
+// Magnitude → color bin. The number itself stays in ink; the bar carries the
+// scale (blue cold → teal cool → green comfort → amber warm → red hot).
+function tempBin(t) {
+  if (t < 16) return css("--s1");
+  if (t < 19) return css("--s2");
+  if (t <= 25) return css("--good");
+  if (t <= 28) return css("--warning");
+  return css("--serious");
+}
+
+function renderDaily(data, homepods) {
+  const card = document.getElementById("dailyCard");
+  const show = ["7d", "30d", "all"].includes(currentRange);
+  card.style.display = show ? "" : "none";
+  if (!show) return;
+  const dayKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  const days = new Map();                  // local day -> { pod: [temps] }
+  homepods.forEach((name) => (data[name] || []).forEach((p) => {
+    const k = dayKey(new Date(p.x));
+    const m = days.get(k) || {};
+    (m[name] = m[name] || []).push(p.temp);
+    days.set(k, m);
+  }));
+  const todayK = dayKey(new Date());
+  document.getElementById("days").innerHTML =
+    [...days.keys()].sort((a, b) => a - b).map((k) => {
+      const pods = Object.values(days.get(k))
+        .map((v) => v.reduce((a, c) => a + c, 0) / v.length);
+      const avg = pods.reduce((a, c) => a + c, 0) / pods.length;
+      const date = new Date(Math.floor(k / 10000), Math.floor(k / 100) % 100 - 1, k % 100);
+      const lbl = k === todayK ? "Today"
+        : date.toLocaleDateString([], { day: "2-digit", month: "short" });
+      return `<span class="day${k === todayK ? " today" : ""}">
+        <span class="d">${lbl}</span>
+        <span class="t">${avg.toFixed(1)}°</span>
+        <span class="bar" style="background:${tempBin(avg)}"></span>
+      </span>`;
+    }).join("");
 }
 
 async function refresh() {
   const status = document.getElementById("status");
   try {
-    const [latRes, serRes] = await Promise.all([
+    // The compare card always needs the last 48h; reuse the main fetch when the
+    // selected range already covers it.
+    const [latRes, serRes, ser3Res] = await Promise.all([
       fetch("/api/latest"),
-      fetch(`/api/series?range=${currentRange}`)
+      fetch(`/api/series?range=${currentRange}`),
+      currentRange === "3d" ? null : fetch("/api/series?range=3d")
     ]);
     const latest = (await latRes.json()).homepods || [];
     const ser = await serRes.json();
+    const ser3 = ser3Res ? await ser3Res.json() : ser;
     const homepods = ser.homepods;
 
     assignColors([...new Set([...latest.map((r) => r.homepod), ...homepods])].sort());
@@ -926,6 +1157,11 @@ async function refresh() {
     document.getElementById("wxToggle").style.display =
       ser.weather_enabled ? "inline-flex" : "none";
 
+    const b = xBounds();
+    [tempChart, humChart].forEach((ch) => {
+      ch.options.scales.x.min = b.min;
+      ch.options.scales.x.max = b.max;
+    });
     tempChart.data.datasets = datasets(ser.data, homepods, "temp", fmtT)
       .concat(wxOn ? [weatherDataset(wx, "temp")] : []);
     humChart.data.datasets = datasets(ser.data, homepods, "humidity", fmtH)
@@ -933,6 +1169,8 @@ async function refresh() {
     tempChart.update(); humChart.update();
     renderLegend("legendTemp", ser.data, homepods, "temp", fmtT);
     renderLegend("legendHum", ser.data, homepods, "humidity", fmtH);
+    renderCompare(ser3);
+    renderDaily(ser.data, homepods);
 
     const total = homepods.reduce((n, h) => n + ser.data[h].length, 0);
     status.textContent = homepods.length
@@ -951,8 +1189,19 @@ function setRange(r, btn) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
+  // Deep link: /#range=7d&mode=avg preselects a view (bookmarkable).
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const hr = hash.get("range"), hm = hash.get("mode");
+  if (hr && document.querySelector(`#ranges [data-range="${hr}"]`)) {
+    currentRange = hr;
+    document.querySelectorAll("#ranges button").forEach((b) =>
+      b.classList.toggle("active", b.dataset.range === hr));
+  }
+  if (hm === "avg" || hm === "pods") displayMode = hm;
+
   tempChart = new Chart(document.getElementById("tempChart"), baseConfig(fmtT, "°"));
   humChart = new Chart(document.getElementById("humChart"), baseConfig(fmtH, "%"));
+  cmpChart = new Chart(document.getElementById("cmpChart"), cmpConfig());
 
   // Touch: show the tooltip only while a finger is down, then dismiss it —
   // otherwise the panel sticks around after a tap and eats the screen.
@@ -961,13 +1210,25 @@ window.addEventListener("DOMContentLoaded", () => {
     if (ch.tooltip) ch.tooltip.setActiveElements([], { x: 0, y: 0 });
     ch.update();
   };
-  [tempChart, humChart].forEach((ch) => {
+  [tempChart, humChart, cmpChart].forEach((ch) => {
     ch.canvas.addEventListener("touchend", () => dismiss(ch), { passive: true });
     ch.canvas.addEventListener("touchcancel", () => dismiss(ch), { passive: true });
   });
 
   document.querySelectorAll("#ranges button").forEach((btn) =>
     btn.addEventListener("click", () => setRange(btn.dataset.range, btn)));
+
+  // Pods / Average display mode (persisted).
+  const modeBtns = document.querySelectorAll("#modes button");
+  const paintMode = () => modeBtns.forEach((b) =>
+    b.classList.toggle("active", b.dataset.mode === displayMode));
+  paintMode();
+  modeBtns.forEach((btn) => btn.addEventListener("click", () => {
+    displayMode = btn.dataset.mode;
+    localStorage.setItem("displayMode", displayMode);
+    paintMode();
+    refresh();
+  }));
 
   const auto = document.getElementById("auto");
   const startTimer = () => { timer = setInterval(refresh, 60000); };

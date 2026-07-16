@@ -18,12 +18,18 @@ to the internet.
 
 ## Features
 
-- 📈 **Dashboard** — temperature & humidity charts, both HomePods overlaid, with
-  end-of-line value labels, hover crosshair + tooltip, and min / max / average per
-  series.
+- 📈 **Dashboard** — temperature & humidity charts, both HomePods overlaid (or one
+  apartment-average curve, your pick), with end-of-line value labels, hover
+  crosshair + tooltip, and min / max / average per series.
 - 🟢 **Live tiles** — current temperature & humidity per room, "x min ago", and a
   comfort chip (Comfort / OK / Out of range) that never relies on color alone.
-- ⏱️ **Ranges** — 24h / 7d / 30d / all, with optional auto-refresh.
+- ⏱️ **Ranges** — 24h / 3d / 7d / 30d / all, with optional auto-refresh and a time
+  axis pinned to round hours on the short ranges.
+- 📊 **Today vs yesterday** — both days overlaid on a time-of-day axis for a quick
+  differential read, plus a **daily-average history** (one color-binned figure per
+  day) on the longer ranges.
+- ☁️ **Optional outdoor weather** (Open-Meteo) as a recessive backdrop behind the
+  indoor curves — off by default, the app stays 100% local unless you opt in.
 - 🌗 **Light & dark**, responsive for phone and desktop, accessible (colorblind-safe
   palette).
 - 📲 **Installable PWA** — add to your iPhone/Mac home screen; works offline from

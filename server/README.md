@@ -45,7 +45,7 @@ Batch (recommended, to send both HomePods in one POST):
   `[0, 100]`, the value isn't a parseable number, or `timestamp` isn't parseable.
 - **200** response: `{ "status": "ok", "received": N, "stored": N }`.
 
-### `GET /api/series?range=24h|7d|30d|all`
+### `GET /api/series?range=24h|3d|7d|30d|all`
 Chart-ready series grouped by HomePod.
 
 ### `GET /api/latest`
@@ -56,8 +56,16 @@ Latest known reading per HomePod (feeds the dashboard's live tiles).
   comfort chip (✓ Comfort / • OK / ▲ Out of range — icon + label, never color alone).
 - **Two charts** (temperature, humidity), both HomePods overlaid, end-of-line value
   labels, hover crosshair + tooltip.
+- **Pods / Average switch** — plot each HomePod, or one apartment-average curve
+  (hourly buckets; persisted client-side).
 - **Per-series stats** (min – max · average) over the selected range.
-- **Ranges** 24h / 7d / 30d / all, auto-refresh (60s).
+- **Ranges** 24h / 3d / 7d / 30d / all, auto-refresh (60s). The 24h and 3d axes are
+  pinned to round local hours (ticks every 3h / 12h), so the time scale doesn't
+  drift with the newest reading; 7d ticks sit on midnights.
+- **Today vs yesterday** — both days' apartment-average temperature overlaid on a
+  time-of-day axis, with the Δ compared over the same hours.
+- **Daily averages** (on 7d/30d/all) — one figure per day, color-binned from cold
+  (blue) to hot (red).
 - **Responsive** phone/desktop, **automatic light/dark**.
 - **Installable PWA** (see below) — Chart.js is vendored, so the page needs no CDN.
 - **Optional outdoor-weather backdrop** (Open-Meteo) behind the indoor curves, with

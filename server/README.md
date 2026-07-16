@@ -60,6 +60,8 @@ Latest known reading per HomePod (feeds the dashboard's live tiles).
 - **Ranges** 24h / 7d / 30d / all, auto-refresh (60s).
 - **Responsive** phone/desktop, **automatic light/dark**.
 - **Installable PWA** (see below) — Chart.js is vendored, so the page needs no CDN.
+- **Optional outdoor-weather backdrop** (Open-Meteo) behind the indoor curves, with
+  an on/off toggle — only when `WEATHER_LAT`/`WEATHER_LON` are set on the server.
 
 ### `GET /manifest.webmanifest` · `GET /sw.js`
 PWA manifest and service worker (caches the shell + data). Served at root so the
@@ -75,6 +77,8 @@ service-worker scope covers the whole app.
 | `PORT` | `8088` | listen port |
 | `DB_PATH` | `/data/homepod.db` | SQLite file (inside the volume) |
 | `RETENTION_DAYS` | `0` | `0` = unlimited history; `>0` prunes readings older than N days at startup |
+| `WEATHER_LAT` / `WEATHER_LON` | *(unset)* | **opt-in** outdoor-weather overlay: set both to your coordinates to draw [Open-Meteo](https://open-meteo.com)'s hourly outdoor temperature/humidity as a gray backdrop behind the indoor curves (free, no API key). When unset the server makes **no outbound request** — the app stays 100% local |
+| `WEATHER_REFRESH_S` | `3600` | how often to re-poll Open-Meteo (min 300s). Each poll backfills ~92 past days, so history survives restarts |
 
 ## Run locally (quick test)
 

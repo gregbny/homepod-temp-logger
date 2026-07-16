@@ -19,12 +19,19 @@ such values quoted, since a bare comma is invalid JSON.
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import os
 import re
 import sqlite3
+import urllib.parse
+import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Iterator, Optional
+
+log = logging.getLogger("homepod")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -37,6 +44,26 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 DB_PATH = os.environ.get("DB_PATH", "/data/homepod.db")
 # 0 = no pruning (unlimited history, the default).
 RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "0"))
+
+# Outdoor weather background (opt-in). When WEATHER_LAT/WEATHER_LON are unset the
+# feature is fully disabled and the server makes NO outbound request — the app
+# stays 100% local, exactly as before. Set both to overlay Open-Meteo's hourly
+# outdoor temperature/humidity behind the indoor curves.
+def _opt_float(name: str) -> Optional[float]:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+WEATHER_LAT = _opt_float("WEATHER_LAT")
+WEATHER_LON = _opt_float("WEATHER_LON")
+WEATHER_ENABLED = WEATHER_LAT is not None and WEATHER_LON is not None
+# How often to re-poll Open-Meteo (seconds). One call backfills ~92 past days.
+WEATHER_REFRESH_S = int(os.environ.get("WEATHER_REFRESH_S", "3600"))
 
 # "Plausible" validation bounds.
 TEMP_MIN, TEMP_MAX = -40.0, 80.0
@@ -83,12 +110,26 @@ def init_db() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_homepod_ts "
             "ON readings (homepod, ts)"
         )
+        # Outdoor weather (Open-Meteo). One row per hour; ts is the primary key so
+        # re-polling the same hours upserts instead of duplicating. History
+        # accumulates over time just like readings.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather (
+                ts        TEXT    PRIMARY KEY,
+                temp      REAL,
+                humidity  REAL
+            )
+            """
+        )
 
 
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     init_db()
     prune_old()
+    if WEATHER_ENABLED:
+        asyncio.create_task(_weather_loop())
 
 
 def prune_old() -> None:
@@ -98,6 +139,78 @@ def prune_old() -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=RETENTION_DAYS)).isoformat()
     with db() as conn:
         conn.execute("DELETE FROM readings WHERE ts < ?", (cutoff,))
+
+
+# --------------------------------------------------------------------------- #
+# Outdoor weather (Open-Meteo) — opt-in, server-side, cached in SQLite
+# --------------------------------------------------------------------------- #
+# Free, no API key, no signup. A single call returns hourly outdoor temperature
+# and relative humidity for the past ~92 days plus the current day.
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+_WEATHER_PAST_DAYS = 92  # Open-Meteo's max look-back on the forecast endpoint.
+
+
+def fetch_weather() -> int:
+    """Poll Open-Meteo and upsert hourly outdoor readings. Returns rows stored.
+
+    Blocking (urllib). Call it off the event loop via ``asyncio.to_thread`` so a
+    slow network never stalls request handling. Any failure is swallowed and
+    logged: the weather overlay is best-effort and must never break the app.
+    """
+    if not WEATHER_ENABLED:
+        return 0
+    query = urllib.parse.urlencode({
+        "latitude": WEATHER_LAT,
+        "longitude": WEATHER_LON,
+        "hourly": "temperature_2m,relative_humidity_2m",
+        "past_days": _WEATHER_PAST_DAYS,
+        "forecast_days": 1,
+        "timezone": "UTC",
+    })
+    req = urllib.request.Request(
+        f"{OPEN_METEO_URL}?{query}",
+        headers={"User-Agent": "homepod-temp-logger"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        payload = json.load(resp)
+
+    hourly = payload.get("hourly") or {}
+    times = hourly.get("time") or []
+    temps = hourly.get("temperature_2m") or []
+    hums = hourly.get("relative_humidity_2m") or []
+
+    rows = []
+    for t, temp, hum in zip(times, temps, hums):
+        if temp is None and hum is None:
+            continue
+        # Open-Meteo returns naive local times; timezone=UTC makes them UTC.
+        ts = datetime.fromisoformat(t).replace(tzinfo=timezone.utc).isoformat()
+        rows.append((ts, temp, hum))
+
+    if not rows:
+        return 0
+    with db() as conn:
+        conn.executemany(
+            """
+            INSERT INTO weather (ts, temp, humidity) VALUES (?, ?, ?)
+            ON CONFLICT(ts) DO UPDATE SET
+                temp = excluded.temp,
+                humidity = excluded.humidity
+            """,
+            rows,
+        )
+    return len(rows)
+
+
+async def _weather_loop() -> None:
+    """Refresh the weather cache on startup, then every WEATHER_REFRESH_S."""
+    while True:
+        try:
+            n = await asyncio.to_thread(fetch_weather)
+            log.info("weather: refreshed %d hourly points", n)
+        except Exception as exc:  # network, JSON, DB — never crash the app.
+            log.warning("weather: refresh failed: %s", exc)
+        await asyncio.sleep(max(WEATHER_REFRESH_S, 300))
 
 
 # --------------------------------------------------------------------------- #
@@ -260,7 +373,29 @@ async def series(range: str = "24h") -> dict:
             {"x": x_ms, "temp": row["temp"], "humidity": row["humidity"]}
         )
 
-    return {"range": range, "homepods": sorted(data.keys()), "data": data}
+    weather: list[dict] = []
+    if WEATHER_ENABLED:
+        with db() as conn:
+            wrows = conn.execute(
+                f"SELECT temp, humidity, ts FROM weather {where} ORDER BY ts",
+                params,
+            ).fetchall()
+        for row in wrows:
+            s = row["ts"]
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            x_ms = int(datetime.fromisoformat(s).timestamp() * 1000)
+            weather.append(
+                {"x": x_ms, "temp": row["temp"], "humidity": row["humidity"]}
+            )
+
+    return {
+        "range": range,
+        "homepods": sorted(data.keys()),
+        "data": data,
+        "weather_enabled": WEATHER_ENABLED,
+        "weather": weather,
+    }
 
 
 @app.get("/api/latest")
@@ -289,7 +424,14 @@ async def latest() -> dict:
 async def health() -> dict:
     with db() as conn:
         n = conn.execute("SELECT COUNT(*) AS n FROM readings").fetchone()["n"]
-    return {"status": "ok", "readings": n, "retention_days": RETENTION_DAYS}
+        w = conn.execute("SELECT COUNT(*) AS n FROM weather").fetchone()["n"]
+    return {
+        "status": "ok",
+        "readings": n,
+        "retention_days": RETENTION_DAYS,
+        "weather_enabled": WEATHER_ENABLED,
+        "weather_points": w,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -324,7 +466,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v2";
+const CACHE = "homepod-logger-v3";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -471,15 +613,30 @@ INDEX_HTML = r"""<!doctype html>
   .tile .when.stale { color:var(--serious); font-weight:600; }
 
   /* Range selector ------------------------------------------------------- */
+  .controls {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:12px 16px; flex-wrap:wrap; margin-bottom:16px;
+  }
   .ranges {
     display:inline-flex; background:var(--surface); border:1px solid var(--border);
-    border-radius:12px; padding:3px; gap:2px; margin-bottom:16px;
+    border-radius:12px; padding:3px; gap:2px;
   }
   .ranges button {
     font:inherit; font-size:.82rem; font-weight:550; border:0; background:transparent;
     color:var(--text-2); padding:7px 14px; border-radius:9px; cursor:pointer;
   }
   .ranges button.active { background:var(--s1); color:#fff; }
+
+  /* Outdoor-weather toggle (only shown when the server has it enabled) ---- */
+  .wx-toggle {
+    display:none; align-items:center; gap:7px; font-size:.78rem;
+    color:var(--text-2); cursor:pointer; user-select:none;
+  }
+  .wx-toggle input { accent-color:var(--s1); width:16px; height:16px; }
+  .wx-swatch {
+    width:15px; height:11px; border-radius:3px; flex:none;
+    background:var(--grid); border:1px solid var(--baseline);
+  }
 
   /* Chart cards ---------------------------------------------------------- */
   .card {
@@ -525,11 +682,17 @@ INDEX_HTML = r"""<!doctype html>
 
 <section class="tiles" id="tiles"></section>
 
-<div class="ranges" id="ranges">
-  <button data-range="24h" class="active">24h</button>
-  <button data-range="7d">7d</button>
-  <button data-range="30d">30d</button>
-  <button data-range="all">All</button>
+<div class="controls">
+  <div class="ranges" id="ranges">
+    <button data-range="24h" class="active">24h</button>
+    <button data-range="7d">7d</button>
+    <button data-range="30d">30d</button>
+    <button data-range="all">All</button>
+  </div>
+  <label class="wx-toggle" id="wxToggle">
+    <input type="checkbox" id="wx" checked>
+    <span class="wx-swatch"></span> Outdoor weather
+  </label>
 </div>
 
 <div class="card">
@@ -551,9 +714,19 @@ const SERIES_VARS = ["--s1","--s2","--s3","--s4","--s5","--s6","--s7","--s8"];
 let currentRange = "24h";
 let colorMap = {};           // homepod -> color (follows the entity, never rank)
 let tempChart, humChart, timer = null;
+// Outdoor-weather overlay is on unless the user unticked it (persisted).
+let showWeather = localStorage.getItem("showWeather") !== "0";
 
 const fmtT = (v) => v.toFixed(1) + "°";
 const fmtH = (v) => Math.round(v) + "%";
+
+// Translucent rgba from a #rrggbb / #rgb token (for the subtle area fill).
+function rgba(hex, a) {
+  hex = hex.replace("#", "");
+  if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+  const n = parseInt(hex, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
 
 function ago(iso) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -609,6 +782,7 @@ const endLabel = {
   afterDatasetsDraw(chart) {
     const { ctx } = chart;
     chart.data.datasets.forEach((ds, i) => {
+      if (ds._weather) return;               // outdoor backdrop: no end label
       const meta = chart.getDatasetMeta(i);
       if (meta.hidden || !meta.data.length) return;
       const p = meta.data[meta.data.length - 1];
@@ -702,6 +876,23 @@ function datasets(data, homepods, field, fmt) {
   }));
 }
 
+// Outdoor weather as a recessive gray area *behind* the indoor lines. It is
+// context, not an entity, so it never takes a series color: muted fill, thin
+// dashed border, higher draw order (drawn first → underneath), no end label.
+function weatherDataset(weather, field) {
+  return {
+    label: "Outdoor",
+    data: weather.map((p) => ({ x: p.x, y: p[field] })).filter((p) => p.y != null),
+    _weather: true,
+    borderColor: css("--baseline"),
+    backgroundColor: rgba(css("--muted"), 0.12),
+    fill: "start",                 // area from the value down to the axis
+    borderWidth: 1, borderDash: [4, 3],
+    tension: .3, pointRadius: 0, pointHoverRadius: 0,
+    spanGaps: true, order: 10, hidden: !showWeather
+  };
+}
+
 function renderLegend(elId, data, homepods, field, fmt) {
   document.getElementById(elId).innerHTML = homepods.map((name) => {
     const vals = data[name].map((p) => p[field]);
@@ -729,8 +920,16 @@ async function refresh() {
     assignColors([...new Set([...latest.map((r) => r.homepod), ...homepods])].sort());
     renderTiles(latest);
 
-    tempChart.data.datasets = datasets(ser.data, homepods, "temp", fmtT);
-    humChart.data.datasets = datasets(ser.data, homepods, "humidity", fmtH);
+    // Outdoor overlay: only when the server has it configured and has data.
+    const wx = ser.weather || [];
+    const wxOn = !!ser.weather_enabled && wx.length > 0;
+    document.getElementById("wxToggle").style.display =
+      ser.weather_enabled ? "inline-flex" : "none";
+
+    tempChart.data.datasets = datasets(ser.data, homepods, "temp", fmtT)
+      .concat(wxOn ? [weatherDataset(wx, "temp")] : []);
+    humChart.data.datasets = datasets(ser.data, homepods, "humidity", fmtH)
+      .concat(wxOn ? [weatherDataset(wx, "humidity")] : []);
     tempChart.update(); humChart.update();
     renderLegend("legendTemp", ser.data, homepods, "temp", fmtT);
     renderLegend("legendHum", ser.data, homepods, "humidity", fmtH);
@@ -776,6 +975,18 @@ window.addEventListener("DOMContentLoaded", () => {
     if (e.target.checked) startTimer(); else { clearInterval(timer); timer = null; }
   });
   if (auto.checked) startTimer();
+
+  // Outdoor-weather toggle: flip visibility in place, no refetch, and persist.
+  const wxBox = document.getElementById("wx");
+  wxBox.checked = showWeather;
+  wxBox.addEventListener("change", (e) => {
+    showWeather = e.target.checked;
+    localStorage.setItem("showWeather", showWeather ? "1" : "0");
+    [tempChart, humChart].forEach((ch) => {
+      ch.data.datasets.forEach((ds) => { if (ds._weather) ds.hidden = !showWeather; });
+      ch.update();
+    });
+  });
 
   // iOS install tip (Safari, when not already standalone).
   const isiOS = /iphone|ipad|ipod/i.test(navigator.userAgent);

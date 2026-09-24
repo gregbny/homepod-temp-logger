@@ -457,7 +457,7 @@ MANIFEST_JSON = """{
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0d0d0d",
+  "background_color": "#000000",
   "theme_color": "#1c5cab",
   "icons": [
     { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
@@ -467,7 +467,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v5";
+const CACHE = "homepod-logger-v6";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -536,8 +536,8 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- PWA -->
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#eef0f4" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#060709" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="HomePod Log">
@@ -547,250 +547,277 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Vendored Chart.js (no internet access required) -->
 <script src="/static/chart.umd.min.js"></script>
 <style>
-  /* "Liquid glass" look: translucent, blurred surfaces floating over a soft
-     tinted backdrop. --surface stays opaque — the canvas halos and tooltips
-     need a solid color; the cards use the --glass tokens. */
+  /* iOS-native look. Content sits on plain grouped cards (systemGroupedBackground
+     + secondarySystemGroupedBackground); the translucent "Liquid Glass" material
+     is reserved for the floating layer — compact nav bar and bottom tab bar —
+     exactly like iOS 26. --surface stays opaque: the canvas halos and tooltips
+     need a solid color. Colors are Apple's system palette. */
   :root {
     color-scheme: light dark;
-    --page:#eef0f4; --surface:#fcfcfb;
-    --text-1:#0b0b0b; --text-2:#52514e; --muted:#7d7b76;
-    --grid:rgba(11,11,11,.08); --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
-    --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300;
-    --s5:#4a3aa7; --s6:#e34948; --s7:#e87ba4; --s8:#eb6834;
-    --good:#0ca30c; --warning:#c98500; --serious:#d03b3b;
-    --glass:rgba(255,255,255,.55); --glass-strong:rgba(255,255,255,.85);
-    --glass-border:rgba(255,255,255,.75); --glass-chip:rgba(255,255,255,.45);
-    --glass-hi:inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(11,11,11,.03);
-    --shadow:0 1px 2px rgba(20,30,60,.05), 0 10px 34px rgba(20,30,60,.09);
-    --blob1:rgba(42,120,214,.30); --blob2:rgba(27,175,122,.22); --blob3:rgba(235,104,52,.18);
-    --spring:cubic-bezier(.34,1.4,.64,1);
+    --page:#f2f2f7; --surface:#ffffff;
+    --text-1:#000000; --text-2:#3c3c43; --muted:#8a8a8e;
+    --grid:rgba(60,60,67,.12); --baseline:#c6c6c8; --border:rgba(60,60,67,.18);
+    --tint:#007aff;
+    --s1:#007aff; --s2:#30b0c7; --s3:#ff9500; --s4:#34c759;
+    --s5:#5856d6; --s6:#ff3b30; --s7:#ff2d55; --s8:#a2845e;
+    --good:#34c759; --warning:#ff9500; --serious:#ff3b30;
+    --fill:rgba(118,118,128,.12); --fill-2:rgba(118,118,128,.08);
+    --thumb:#ffffff; --thumb-shadow:0 3px 8px rgba(0,0,0,.12), 0 3px 1px rgba(0,0,0,.04);
+    --glass-bg:rgba(255,255,255,.62); --glass-edge:rgba(255,255,255,.85);
+    --glass-hi:rgba(255,255,255,.9); --glass-sel:rgba(118,118,128,.16);
+    --glass-shadow:0 10px 30px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.06);
+    --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+    --spring:cubic-bezier(.3,1.3,.6,1);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --page:#060709; --surface:#1a1a19;
-      --text-1:#fff; --text-2:#c3c2b7; --muted:#8e8c86;
-      --grid:rgba(255,255,255,.08); --baseline:#383835; --border:rgba(255,255,255,.10);
-      --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300;
-      --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
-      --good:#0ca30c; --warning:#fab219; --serious:#e0554f;
-      --glass:rgba(38,40,46,.50); --glass-strong:rgba(90,94,104,.55);
-      --glass-border:rgba(255,255,255,.12); --glass-chip:rgba(255,255,255,.05);
-      --glass-hi:inset 0 1px 0 rgba(255,255,255,.10);
-      --shadow:0 10px 34px rgba(0,0,0,.45);
-      --blob1:rgba(57,135,229,.28); --blob2:rgba(25,158,112,.18); --blob3:rgba(144,133,233,.18);
+      --page:#000000; --surface:#1c1c1e;
+      --text-1:#ffffff; --text-2:#ebebf5; --muted:#8d8d93;
+      --grid:rgba(235,235,245,.10); --baseline:#38383a; --border:rgba(235,235,245,.14);
+      --tint:#0a84ff;
+      --s1:#0a84ff; --s2:#40c8e0; --s3:#ff9f0a; --s4:#30d158;
+      --s5:#5e5ce6; --s6:#ff453a; --s7:#ff375f; --s8:#ac8e68;
+      --good:#30d158; --warning:#ff9f0a; --serious:#ff453a;
+      --fill:rgba(118,118,128,.24); --fill-2:rgba(118,118,128,.16);
+      --thumb:#636366; --thumb-shadow:0 3px 8px rgba(0,0,0,.3);
+      --glass-bg:rgba(37,37,40,.58); --glass-edge:rgba(255,255,255,.14);
+      --glass-hi:rgba(255,255,255,.10); --glass-sel:rgba(255,255,255,.14);
+      --glass-shadow:0 10px 30px rgba(0,0,0,.55);
     }
   }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html { -webkit-text-size-adjust:100%; overflow-x:hidden; background:var(--page); }
   body {
-    font-family: -apple-system, system-ui, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-    margin:0; background:var(--page); color:var(--text-1);
-    padding: 0 16px calc(env(safe-area-inset-bottom) + 24px);
-    max-width:1040px; margin-inline:auto; line-height:1.4; overflow-x:hidden;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+    margin:0 auto; background:var(--page); color:var(--text-1);
+    padding: calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 96px);
+    max-width:1040px; line-height:1.35; overflow-x:hidden;
     -webkit-font-smoothing:antialiased;
   }
-  /* Soft colored light behind the glass (fixed, so it doesn't scroll). */
-  body::before {
-    content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
-    background:
-      radial-gradient(60vmax 45vmax at 5% 0%, var(--blob1), transparent 70%),
-      radial-gradient(50vmax 40vmax at 100% 35%, var(--blob2), transparent 70%),
-      radial-gradient(55vmax 45vmax at 20% 100%, var(--blob3), transparent 70%),
-      var(--page);
-  }
   canvas { max-width:100%; }
+  button { font:inherit; }
 
-  /* Shared glass material. */
-  .glass, .tile, .card, .ranges, .ios-hint {
-    background:var(--glass);
-    -webkit-backdrop-filter:blur(26px) saturate(180%);
-    backdrop-filter:blur(26px) saturate(180%);
-    border:1px solid var(--glass-border);
-    box-shadow:var(--glass-hi), var(--shadow);
+  /* Liquid Glass material (floating layer only). */
+  .glass {
+    background:var(--glass-bg);
+    -webkit-backdrop-filter:blur(24px) saturate(190%);
+    backdrop-filter:blur(24px) saturate(190%);
+    box-shadow:inset 0 0 0 .5px var(--glass-edge), inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
   }
 
+  /* Compact nav bar: fades in once the large title scrolls away. */
+  .topbar {
+    position:fixed; top:0; left:0; right:0; z-index:30;
+    padding:env(safe-area-inset-top) 16px 0; height:calc(env(safe-area-inset-top) + 44px);
+    display:flex; align-items:center; justify-content:center;
+    font-size:17px; font-weight:600;
+    background:var(--glass-bg);
+    -webkit-backdrop-filter:blur(24px) saturate(190%);
+    backdrop-filter:blur(24px) saturate(190%);
+    border-bottom:.5px solid var(--border);
+    opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .topbar.show { opacity:1; }
+
+  /* Large title. */
   header {
-    position:sticky; top:0; z-index:20;
-    display:flex; align-items:center; justify-content:space-between;
-    gap:12px; margin:0 -16px 16px;
-    padding: calc(max(env(safe-area-inset-top), 12px) + 4px) 16px 12px;
-    background:var(--glass);
-    -webkit-backdrop-filter:blur(26px) saturate(180%);
-    backdrop-filter:blur(26px) saturate(180%);
-    border-bottom:1px solid var(--glass-border);
+    display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
+    padding:8px 4px 16px;
   }
-  .brand { display:flex; align-items:center; gap:10px; }
-  .brand img { width:34px; height:34px; border-radius:9px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
-  .brand h1 { font-size:1.15rem; margin:0; font-weight:700; letter-spacing:-.02em; }
-  .brand .sub { font-size:.72rem; color:var(--muted); }
-  .refresh {
-    display:flex; align-items:center; gap:6px; font-size:.78rem; color:var(--text-2);
-    cursor:pointer; user-select:none;
+  header h1 { font-size:clamp(26px, 8.2vw, 34px); white-space:nowrap; line-height:1.1; margin:0; font-weight:700; letter-spacing:-.02em; }
+  header .sub { font-size:15px; color:var(--muted); margin-top:2px; }
+  .switch-row {
+    display:flex; align-items:center; gap:8px; font-size:15px; color:var(--muted);
+    cursor:pointer; user-select:none; padding-bottom:2px;
   }
-  .refresh input { accent-color:var(--s1); width:16px; height:16px; }
 
-  /* Live tiles ----------------------------------------------------------- */
-  .tiles { display:grid; gap:12px; grid-template-columns:1fr; margin-bottom:20px; }
-  @media (min-width:560px){ .tiles { grid-template-columns:1fr 1fr; } }
-  .tile { border-radius:26px; padding:18px; min-width:0; }
-  .tile .top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
-  .tile .name { display:flex; align-items:center; gap:8px; font-weight:600; font-size:.95rem; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .dot { width:11px; height:11px; border-radius:50%; flex:none; }
-  .chip {
-    display:inline-flex; align-items:center; gap:5px; font-size:.72rem; font-weight:600;
-    padding:3px 10px; border-radius:999px; border:1px solid var(--glass-border);
-    background:var(--glass-chip); white-space:nowrap;
+  /* iOS switch. */
+  .switch {
+    -webkit-appearance:none; appearance:none; margin:0; flex:none; cursor:pointer;
+    position:relative; width:51px; height:31px; border-radius:999px;
+    background:var(--fill); transition:background .25s;
   }
-  .chip .ico { font-size:.8em; }
-  .metrics { display:flex; gap:22px; }
-  .metric .k { font-size:.72rem; color:var(--muted); margin-bottom:2px; }
-  .metric .v { font-size:2.2rem; font-weight:650; letter-spacing:-.03em; line-height:1; }
-  .metric .v small { font-size:.9rem; font-weight:500; color:var(--text-2); }
-  .tile .when { margin-top:12px; font-size:.72rem; color:var(--muted); }
+  .switch::before {
+    content:""; position:absolute; top:2px; left:2px; width:27px; height:27px;
+    border-radius:50%; background:#fff;
+    box-shadow:0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16);
+    transition:transform .3s var(--spring), width .2s;
+  }
+  .switch:checked { background:var(--good); }
+  .switch:checked::before { transform:translateX(20px); }
+  .switch:active::before { width:31px; }
+  .switch:checked:active::before { transform:translateX(16px); }
+
+  /* Live tiles (one compact card per pod, side by side on phones) ------------ */
+  .tiles { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(158px, 1fr)); margin-bottom:12px; }
+  .tile { background:var(--surface); border-radius:22px; padding:14px 16px 14px; min-width:0; }
+  .tile .name { display:flex; align-items:center; gap:7px; font-weight:600; font-size:15px; min-width:0; }
+  .tile .name span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dot { width:10px; height:10px; border-radius:50%; flex:none; }
+  .tile .temp {
+    font-family:var(--rounded); font-size:44px; font-weight:500; line-height:1;
+    letter-spacing:-.02em; margin:10px 0 4px; font-variant-numeric:tabular-nums;
+  }
+  .tile .hum { font-size:15px; color:var(--text-2); font-variant-numeric:tabular-nums; }
+  .tile .hum b { font-weight:600; color:var(--text-1); }
+  .tile .foot { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:12px; }
+  .chip {
+    display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600;
+    padding:3px 8px; border-radius:999px; white-space:nowrap;
+    background:color-mix(in srgb, currentColor 14%, transparent);
+  }
+  .tile .when { font-size:12px; color:var(--muted); white-space:nowrap; }
   .tile .when.stale { color:var(--serious); font-weight:600; }
 
-  /* Segmented controls: a glass capsule with a sliding "lens" thumb -------- */
-  .controls {
-    display:flex; align-items:center; justify-content:space-between;
-    gap:12px 16px; flex-wrap:wrap; margin-bottom:16px;
+  /* Segmented controls ----------------------------------------------------- */
+  .seg {
+    position:relative; display:flex; border-radius:999px; padding:2px;
+    background:var(--fill);
   }
-  .ranges {
-    position:relative; display:inline-flex; border-radius:999px; padding:4px; gap:2px;
+  .seg button {
+    position:relative; z-index:1; flex:1 1 0; min-width:0;
+    font-size:13px; font-weight:500; border:0; background:transparent;
+    color:var(--text-1); height:30px; padding:0 10px; border-radius:999px; cursor:pointer;
   }
-  .ranges .thumb {
-    position:absolute; top:4px; bottom:4px; left:0; width:0; border-radius:999px;
-    background:linear-gradient(180deg, rgba(255,255,255,.28), rgba(255,255,255,0) 60%), var(--s1);
-    box-shadow:0 4px 14px rgba(42,120,214,.35), inset 0 1px 0 rgba(255,255,255,.4);
-    transition:transform .45s var(--spring), width .45s var(--spring);
+  .seg button.active { font-weight:600; }
+  .seg .thumb {
+    position:absolute; top:2px; bottom:2px; left:0; width:0; border-radius:999px;
+    background:var(--thumb); box-shadow:var(--thumb-shadow);
+    transition:transform .4s var(--spring), width .4s var(--spring), scale .25s var(--spring);
     pointer-events:none;
   }
-  .ranges button {
-    position:relative; z-index:1;
-    font:inherit; font-size:.84rem; font-weight:600; border:0; background:transparent;
-    color:var(--text-2); padding:8px 15px; border-radius:999px; cursor:pointer;
-    transition:color .25s, transform .2s var(--spring);
-  }
-  .ranges button:active { transform:scale(.94); }
-  .ranges button.active { color:#fff; }
+  .seg.pressing .thumb { scale:1.06; }
 
-  /* Outdoor-weather toggle (only shown when the server has it enabled) ---- */
-  .wx-toggle {
-    display:none; align-items:center; gap:7px; font-size:.78rem;
-    color:var(--text-2); cursor:pointer; user-select:none;
+  .controls {
+    display:flex; align-items:center; gap:12px 16px; flex-wrap:wrap; margin:4px 0 12px;
   }
-  .wx-toggle input { accent-color:var(--s1); width:16px; height:16px; }
+  .controls .seg { flex:1 1 220px; }
+  .wx-toggle {
+    display:none; align-items:center; gap:8px; font-size:15px;
+    color:var(--text-1); cursor:pointer; user-select:none; margin-left:auto;
+  }
   .wx-swatch {
     width:15px; height:11px; border-radius:3px; flex:none;
-    background:var(--grid); border:1px solid var(--baseline);
+    background:var(--grid); border:1px dashed var(--baseline);
   }
 
-  /* Chart cards ---------------------------------------------------------- */
-  .card { border-radius:26px; padding:18px; margin-bottom:16px; min-width:0; }
-  .card h2 { font-size:1rem; margin:0 0 2px; font-weight:650; letter-spacing:-.01em; }
-  .card .sub { font-size:.74rem; color:var(--muted); }
-  .legend { display:flex; flex-wrap:wrap; gap:14px 18px; margin:10px 0 14px; }
-  .legend .item { display:flex; align-items:center; gap:8px; font-size:.78rem; }
+  /* Floating Liquid Glass tab bar: the range picker. ----------------------- */
+  .tabbar {
+    position:fixed; z-index:30; left:50%; transform:translateX(-50%);
+    bottom:calc(env(safe-area-inset-bottom) + 12px);
+    width:min(calc(100% - 32px), 420px);
+    display:flex; padding:4px; border-radius:999px;
+  }
+  .tabbar button {
+    position:relative; z-index:1; flex:1 1 0; height:46px; border:0; border-radius:999px;
+    background:transparent; color:var(--text-1); font-size:15px; font-weight:600;
+    cursor:pointer; transition:color .2s;
+  }
+  .tabbar button.active { color:var(--tint); }
+  .tabbar .thumb {
+    position:absolute; top:4px; bottom:4px; left:0; width:0; border-radius:999px;
+    background:var(--glass-sel);
+    transition:transform .45s var(--spring), width .45s var(--spring), scale .25s var(--spring);
+    pointer-events:none;
+  }
+  .tabbar.pressing .thumb { scale:1.12; }
+
+  /* Cards ---------------------------------------------------------------- */
+  .card { background:var(--surface); border-radius:22px; padding:16px; margin-bottom:12px; min-width:0; }
+  .card h2 { font-size:17px; margin:0 0 2px; font-weight:600; letter-spacing:-.01em; }
+  .card .sub { font-size:13px; color:var(--muted); }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 16px; margin:8px 0 12px; }
+  .legend .item { display:flex; align-items:center; gap:6px; font-size:13px; }
   .legend .item .lbl { font-weight:600; color:var(--text-1); }
   .legend .item .stat { color:var(--muted); font-variant-numeric:tabular-nums; }
   .chart-wrap { position:relative; height:280px; }
   @media (max-width:500px){
     .chart-wrap { height:240px; }
-    /* Reclaim horizontal space so the charts are wider on phones. */
-    body { padding-left:10px; padding-right:10px; }
-    header { margin-inline:-10px; padding-inline:14px; }
-    .card { padding:16px 12px; }
+    .card { padding:16px 12px 12px; }
+    .card h2, .card .sub, .legend { padding-inline:4px; }
   }
 
   /* Daily-average history: one month per page, swipe left/right ----------- */
   .month-nav {
-    display:flex; align-items:center; justify-content:space-between; gap:8px;
-    margin:14px 0 10px;
+    display:grid; grid-template-columns:34px 1fr 34px; align-items:center; gap:8px;
+    margin:14px 0 12px; text-align:center;
   }
-  .month-nav .lbl { font-weight:650; font-size:.95rem; text-transform:capitalize; }
-  .month-nav .lbl small { display:block; font-size:.7rem; font-weight:500; color:var(--muted); text-transform:none; }
+  .month-nav .lbl { font-weight:600; font-size:17px; }
+  .month-nav .lbl::first-letter { text-transform:uppercase; }
+  .month-nav .lbl small { display:block; font-size:13px; font-weight:400; color:var(--muted); }
   .navbtn {
-    width:36px; height:36px; border-radius:50%; flex:none; cursor:pointer;
-    font:inherit; font-size:1.2rem; line-height:1; color:var(--text-1);
-    background:var(--glass-chip); border:1px solid var(--glass-border);
-    box-shadow:var(--glass-hi);
+    width:34px; height:34px; border-radius:50%; border:0; padding:0; cursor:pointer;
+    display:grid; place-items:center; color:var(--tint); background:var(--fill);
     transition:transform .2s var(--spring), opacity .2s;
   }
-  .navbtn:active { transform:scale(.9); }
-  .navbtn:disabled { opacity:.3; cursor:default; }
+  .navbtn svg { width:18px; height:18px; }
+  .navbtn:active { transform:scale(.88); }
+  .navbtn:disabled { opacity:.35; cursor:default; }
   .months {
     display:flex; overflow-x:auto; overflow-y:hidden;
     scroll-snap-type:x mandatory; scroll-behavior:smooth;
     overscroll-behavior-x:contain; scrollbar-width:none;
-    -webkit-overflow-scrolling:touch;
   }
   .months::-webkit-scrollbar { display:none; }
   .month { flex:0 0 100%; min-width:0; scroll-snap-align:start; scroll-snap-stop:always; }
-  .wk, .cal { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:6px; }
+  .wk, .cal { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:5px; }
   .wk { margin-bottom:6px; }
-  .wk span { text-align:center; font-size:.66rem; font-weight:600; color:var(--muted); text-transform:uppercase; }
+  .wk span { text-align:center; font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; }
   .day {
     display:flex; flex-direction:column; align-items:center; gap:3px;
-    padding:6px 2px 7px; border-radius:14px; min-width:0;
-    background:var(--glass-chip); border:1px solid var(--glass-border);
+    padding:6px 0 7px; border-radius:12px; min-width:0; background:var(--fill-2);
   }
-  .day.empty { background:transparent; border-color:transparent; }
-  .day.today { border-color:var(--s1); box-shadow:0 0 0 1px var(--s1) inset; }
-  .day .d { font-size:.64rem; color:var(--muted); font-variant-numeric:tabular-nums; }
-  .day .t { font-size:.82rem; font-weight:650; font-variant-numeric:tabular-nums; letter-spacing:-.02em; white-space:nowrap; }
+  .day.empty { background:transparent; }
+  .day.today { background:color-mix(in srgb, var(--tint) 16%, transparent); }
+  .day.today .d { color:var(--tint); font-weight:700; }
+  .day .d { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .day .t { font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.02em; white-space:nowrap; }
   .day.empty .t { color:var(--muted); font-weight:400; }
-  .day .bar { width:60%; max-width:26px; height:4px; border-radius:2px; }
+  .day .bar { width:55%; max-width:24px; height:4px; border-radius:2px; }
   .mdots { display:flex; justify-content:center; gap:6px; margin-top:12px; }
   .mdots span {
-    width:6px; height:6px; border-radius:3px; background:var(--muted); opacity:.35;
+    width:7px; height:7px; border-radius:4px; background:var(--text-1); opacity:.2;
     transition:width .35s var(--spring), opacity .25s;
   }
-  .mdots span.on { width:18px; opacity:.9; }
+  .mdots span.on { width:18px; opacity:.75; }
 
-  .status-line { font-size:.74rem; color:var(--muted); text-align:center; margin-top:4px; }
+  .status-line { font-size:12px; color:var(--muted); text-align:center; margin-top:4px; }
   .ios-hint {
-    display:none; font-size:.78rem; color:var(--text-2);
-    border-radius:18px; padding:10px 14px; margin-bottom:16px;
+    display:none; font-size:15px; color:var(--text-2); background:var(--surface);
+    border-radius:18px; padding:12px 16px; margin-bottom:12px;
   }
-  .ios-hint b { color:var(--text-1); }
+  .ios-hint b { color:var(--text-1); font-weight:600; }
   @media (prefers-reduced-motion: reduce) {
-    .ranges .thumb, .mdots span, .navbtn, .ranges button { transition:none; }
+    .seg .thumb, .tabbar .thumb, .mdots span, .navbtn, .switch::before { transition:none; }
     .months { scroll-behavior:auto; }
   }
 </style>
 </head>
 <body>
+<nav class="topbar" id="topbar" aria-hidden="true">HomePod Logger</nav>
+
 <header>
-  <div class="brand">
-    <img src="/static/icon-192.png" alt="">
-    <div>
-      <h1>HomePod Logger</h1>
-      <div class="sub">Temperature &amp; humidity</div>
-    </div>
+  <div>
+    <h1>HomePod Logger</h1>
+    <div class="sub">Temperature &amp; humidity</div>
   </div>
-  <label class="refresh"><input type="checkbox" id="auto" checked> auto</label>
+  <label class="switch-row">Auto <input type="checkbox" class="switch" id="auto" checked></label>
 </header>
 
 <div class="ios-hint" id="iosHint">
-  📲 Tip: <b>Share</b> → <b>Add to Home Screen</b> to install the app.
+  Tip: <b>Share</b> → <b>Add to Home Screen</b> to install the app.
 </div>
 
 <section class="tiles" id="tiles"></section>
 
 <div class="controls">
-  <div class="ranges" id="ranges">
-    <button data-range="24h" class="active">24h</button>
-    <button data-range="3d">3d</button>
-    <button data-range="7d">7d</button>
-    <button data-range="30d">30d</button>
-    <button data-range="all">All</button>
-  </div>
-  <div class="ranges" id="modes">
+  <div class="seg" id="modes">
     <button data-mode="pods">Pods</button>
     <button data-mode="avg">Average</button>
   </div>
   <label class="wx-toggle" id="wxToggle">
-    <input type="checkbox" id="wx" checked>
-    <span class="wx-swatch"></span> Outdoor weather
+    <span class="wx-swatch"></span> Outdoor
+    <input type="checkbox" class="switch" id="wx" checked>
   </label>
 </div>
 
@@ -812,17 +839,25 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 <div class="card" id="dailyCard" style="display:none">
   <h2>Daily average</h2>
-  <div class="sub">Apartment mean temperature, one figure per day · swipe for other months</div>
+  <div class="sub">Apartment mean temperature · swipe for other months</div>
   <div class="month-nav">
-    <button class="navbtn" id="mPrev" aria-label="Previous month">‹</button>
+    <button class="navbtn" id="mPrev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
     <span class="lbl" id="mLabel"></span>
-    <button class="navbtn" id="mNext" aria-label="Next month">›</button>
+    <button class="navbtn" id="mNext" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
   </div>
   <div class="months" id="months"></div>
   <div class="mdots" id="mdots"></div>
 </div>
 
 <p class="status-line" id="status">Loading…</p>
+
+<nav class="tabbar glass" id="ranges" aria-label="Time range">
+  <button data-range="24h" class="active">24h</button>
+  <button data-range="3d">3d</button>
+  <button data-range="7d">7d</button>
+  <button data-range="30d">30d</button>
+  <button data-range="all">All</button>
+</nav>
 
 <script>
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -885,15 +920,13 @@ function renderTiles(items) {
     const stale = isStale(r.ts);
     return `
       <div class="tile">
-        <div class="top">
-          <span class="name"><span class="dot" style="background:${colorMap[r.homepod]}"></span>${r.homepod}</span>
-          <span class="chip" style="color:${c.v}"><span class="ico">${c.ico}</span>${c.lbl}</span>
+        <div class="name"><span class="dot" style="background:${colorMap[r.homepod]}"></span><span>${r.homepod}</span></div>
+        <div class="temp">${fmtT(r.temp)}</div>
+        <div class="hum">Humidity <b>${Math.round(r.humidity)}%</b></div>
+        <div class="foot">
+          <span class="chip" style="color:${c.v}">${c.ico} ${c.lbl}</span>
+          <span class="when ${stale ? "stale" : ""}">${ago(r.ts)}</span>
         </div>
-        <div class="metrics">
-          <div class="metric"><div class="k">Temperature</div><div class="v">${fmtT(r.temp)}<small>C</small></div></div>
-          <div class="metric"><div class="k">Humidity</div><div class="v">${Math.round(r.humidity)}<small>%</small></div></div>
-        </div>
-        <div class="when ${stale ? "stale" : ""}">${ago(r.ts)}</div>
       </div>`;
   }).join("");
 }
@@ -1311,7 +1344,7 @@ function paintThumb(group) {
   th.style.width = a ? a.offsetWidth + "px" : "0";
   th.style.transform = `translateX(${a ? a.offsetLeft : 0}px)`;
 }
-const paintThumbs = () => document.querySelectorAll(".ranges").forEach(paintThumb);
+const paintThumbs = () => document.querySelectorAll(".seg, .tabbar").forEach(paintThumb);
 
 async function refresh() {
   const status = document.getElementById("status");
@@ -1387,6 +1420,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   if (hm === "avg" || hm === "pods") displayMode = hm;
 
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   tempChart = new Chart(document.getElementById("tempChart"), baseConfig(fmtT, "°"));
   humChart = new Chart(document.getElementById("humChart"), baseConfig(fmtH, "%"));
   cmpChart = new Chart(document.getElementById("cmpChart"), cmpConfig());
@@ -1437,6 +1471,19 @@ window.addEventListener("DOMContentLoaded", () => {
     if (dailyMonths.length) snapMonth();
   });
   if (document.fonts) document.fonts.ready.then(paintThumbs);
+
+  // Liquid-glass "lens": the selection capsule swells while a finger is down.
+  document.querySelectorAll(".seg, .tabbar").forEach((g) => {
+    const off = () => g.classList.remove("pressing");
+    g.addEventListener("pointerdown", () => g.classList.add("pressing"));
+    ["pointerup", "pointercancel", "pointerleave"].forEach((e) => g.addEventListener(e, off));
+  });
+
+  // Compact glass nav bar once the large title has scrolled away.
+  const topbar = document.getElementById("topbar");
+  const onScroll = () => topbar.classList.toggle("show", scrollY > 48);
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
 
   const auto = document.getElementById("auto");
   const startTimer = () => { timer = setInterval(refresh, 60000); };

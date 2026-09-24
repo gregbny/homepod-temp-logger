@@ -67,8 +67,9 @@ Latest known reading per HomePod (feeds the dashboard's live tiles).
 - **Daily averages** — one figure per day, color-binned from cold (blue) to hot
   (red), as a Monday-first calendar with one page per month: swipe left/right
   (or use ‹ ›) to browse the whole history.
-- **Responsive** phone/desktop, **automatic light/dark**, iOS-style translucent
-  "liquid glass" surfaces.
+- **Responsive** phone/desktop, **automatic light/dark**, iOS-native look:
+  grouped cards, large title, system switches/segmented control, and a floating
+  Liquid Glass tab bar for the time range.
 - **Installable PWA** (see below) — Chart.js is vendored, so the page needs no CDN.
 - **Optional outdoor-weather backdrop** (Open-Meteo) behind the indoor curves, with
   an on/off toggle — only when `WEATHER_LAT`/`WEATHER_LON` are set on the server.

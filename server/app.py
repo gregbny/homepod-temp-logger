@@ -467,7 +467,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v4";
+const CACHE = "homepod-logger-v5";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -536,8 +536,8 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- PWA -->
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef0f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#060709" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="HomePod Log">
@@ -547,43 +547,81 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Vendored Chart.js (no internet access required) -->
 <script src="/static/chart.umd.min.js"></script>
 <style>
+  /* "Liquid glass" look: translucent, blurred surfaces floating over a soft
+     tinted backdrop. --surface stays opaque — the canvas halos and tooltips
+     need a solid color; the cards use the --glass tokens. */
   :root {
     color-scheme: light dark;
-    --page:#f9f9f7; --surface:#fcfcfb;
-    --text-1:#0b0b0b; --text-2:#52514e; --muted:#898781;
-    --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
+    --page:#eef0f4; --surface:#fcfcfb;
+    --text-1:#0b0b0b; --text-2:#52514e; --muted:#7d7b76;
+    --grid:rgba(11,11,11,.08); --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
     --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300;
     --s5:#4a3aa7; --s6:#e34948; --s7:#e87ba4; --s8:#eb6834;
     --good:#0ca30c; --warning:#c98500; --serious:#d03b3b;
-    --shadow:0 1px 2px rgba(11,11,11,.04), 0 6px 20px rgba(11,11,11,.05);
+    --glass:rgba(255,255,255,.55); --glass-strong:rgba(255,255,255,.85);
+    --glass-border:rgba(255,255,255,.75); --glass-chip:rgba(255,255,255,.45);
+    --glass-hi:inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(11,11,11,.03);
+    --shadow:0 1px 2px rgba(20,30,60,.05), 0 10px 34px rgba(20,30,60,.09);
+    --blob1:rgba(42,120,214,.30); --blob2:rgba(27,175,122,.22); --blob3:rgba(235,104,52,.18);
+    --spring:cubic-bezier(.34,1.4,.64,1);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --page:#0d0d0d; --surface:#1a1a19;
-      --text-1:#fff; --text-2:#c3c2b7; --muted:#898781;
-      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
+      --page:#060709; --surface:#1a1a19;
+      --text-1:#fff; --text-2:#c3c2b7; --muted:#8e8c86;
+      --grid:rgba(255,255,255,.08); --baseline:#383835; --border:rgba(255,255,255,.10);
       --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300;
       --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
       --good:#0ca30c; --warning:#fab219; --serious:#e0554f;
-      --shadow:none;
+      --glass:rgba(38,40,46,.50); --glass-strong:rgba(90,94,104,.55);
+      --glass-border:rgba(255,255,255,.12); --glass-chip:rgba(255,255,255,.05);
+      --glass-hi:inset 0 1px 0 rgba(255,255,255,.10);
+      --shadow:0 10px 34px rgba(0,0,0,.45);
+      --blob1:rgba(57,135,229,.28); --blob2:rgba(25,158,112,.18); --blob3:rgba(144,133,233,.18);
     }
   }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html { -webkit-text-size-adjust:100%; overflow-x:hidden; }
+  html { -webkit-text-size-adjust:100%; overflow-x:hidden; background:var(--page); }
   body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-family: -apple-system, system-ui, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
     margin:0; background:var(--page); color:var(--text-1);
-    padding: max(env(safe-area-inset-top), 12px) 16px calc(env(safe-area-inset-bottom) + 24px);
+    padding: 0 16px calc(env(safe-area-inset-bottom) + 24px);
     max-width:1040px; margin-inline:auto; line-height:1.4; overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* Soft colored light behind the glass (fixed, so it doesn't scroll). */
+  body::before {
+    content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+    background:
+      radial-gradient(60vmax 45vmax at 5% 0%, var(--blob1), transparent 70%),
+      radial-gradient(50vmax 40vmax at 100% 35%, var(--blob2), transparent 70%),
+      radial-gradient(55vmax 45vmax at 20% 100%, var(--blob3), transparent 70%),
+      var(--page);
   }
   canvas { max-width:100%; }
+
+  /* Shared glass material. */
+  .glass, .tile, .card, .ranges, .ios-hint {
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(26px) saturate(180%);
+    backdrop-filter:blur(26px) saturate(180%);
+    border:1px solid var(--glass-border);
+    box-shadow:var(--glass-hi), var(--shadow);
+  }
+
   header {
+    position:sticky; top:0; z-index:20;
     display:flex; align-items:center; justify-content:space-between;
-    gap:12px; padding:8px 0 16px;
+    gap:12px; margin:0 -16px 16px;
+    padding: calc(max(env(safe-area-inset-top), 12px) + 4px) 16px 12px;
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(26px) saturate(180%);
+    backdrop-filter:blur(26px) saturate(180%);
+    border-bottom:1px solid var(--glass-border);
   }
   .brand { display:flex; align-items:center; gap:10px; }
-  .brand img { width:34px; height:34px; border-radius:8px; }
-  .brand h1 { font-size:1.15rem; margin:0; font-weight:650; letter-spacing:-.01em; }
+  .brand img { width:34px; height:34px; border-radius:9px; box-shadow:0 2px 8px rgba(0,0,0,.12); }
+  .brand h1 { font-size:1.15rem; margin:0; font-weight:700; letter-spacing:-.02em; }
   .brand .sub { font-size:.72rem; color:var(--muted); }
   .refresh {
     display:flex; align-items:center; gap:6px; font-size:.78rem; color:var(--text-2);
@@ -594,39 +632,46 @@ INDEX_HTML = r"""<!doctype html>
   /* Live tiles ----------------------------------------------------------- */
   .tiles { display:grid; gap:12px; grid-template-columns:1fr; margin-bottom:20px; }
   @media (min-width:560px){ .tiles { grid-template-columns:1fr 1fr; } }
-  .tile {
-    background:var(--surface); border:1px solid var(--border); border-radius:16px;
-    padding:16px; box-shadow:var(--shadow); min-width:0;
-  }
+  .tile { border-radius:26px; padding:18px; min-width:0; }
   .tile .top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
   .tile .name { display:flex; align-items:center; gap:8px; font-weight:600; font-size:.95rem; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .dot { width:11px; height:11px; border-radius:50%; flex:none; }
   .chip {
     display:inline-flex; align-items:center; gap:5px; font-size:.72rem; font-weight:600;
-    padding:3px 9px; border-radius:999px; border:1px solid var(--border); white-space:nowrap;
+    padding:3px 10px; border-radius:999px; border:1px solid var(--glass-border);
+    background:var(--glass-chip); white-space:nowrap;
   }
   .chip .ico { font-size:.8em; }
   .metrics { display:flex; gap:22px; }
   .metric .k { font-size:.72rem; color:var(--muted); margin-bottom:2px; }
-  .metric .v { font-size:2rem; font-weight:650; letter-spacing:-.02em; line-height:1; }
+  .metric .v { font-size:2.2rem; font-weight:650; letter-spacing:-.03em; line-height:1; }
   .metric .v small { font-size:.9rem; font-weight:500; color:var(--text-2); }
   .tile .when { margin-top:12px; font-size:.72rem; color:var(--muted); }
   .tile .when.stale { color:var(--serious); font-weight:600; }
 
-  /* Range selector ------------------------------------------------------- */
+  /* Segmented controls: a glass capsule with a sliding "lens" thumb -------- */
   .controls {
     display:flex; align-items:center; justify-content:space-between;
     gap:12px 16px; flex-wrap:wrap; margin-bottom:16px;
   }
   .ranges {
-    display:inline-flex; background:var(--surface); border:1px solid var(--border);
-    border-radius:12px; padding:3px; gap:2px;
+    position:relative; display:inline-flex; border-radius:999px; padding:4px; gap:2px;
+  }
+  .ranges .thumb {
+    position:absolute; top:4px; bottom:4px; left:0; width:0; border-radius:999px;
+    background:linear-gradient(180deg, rgba(255,255,255,.28), rgba(255,255,255,0) 60%), var(--s1);
+    box-shadow:0 4px 14px rgba(42,120,214,.35), inset 0 1px 0 rgba(255,255,255,.4);
+    transition:transform .45s var(--spring), width .45s var(--spring);
+    pointer-events:none;
   }
   .ranges button {
-    font:inherit; font-size:.82rem; font-weight:550; border:0; background:transparent;
-    color:var(--text-2); padding:7px 14px; border-radius:9px; cursor:pointer;
+    position:relative; z-index:1;
+    font:inherit; font-size:.84rem; font-weight:600; border:0; background:transparent;
+    color:var(--text-2); padding:8px 15px; border-radius:999px; cursor:pointer;
+    transition:color .25s, transform .2s var(--spring);
   }
-  .ranges button.active { background:var(--s1); color:#fff; }
+  .ranges button:active { transform:scale(.94); }
+  .ranges button.active { color:#fff; }
 
   /* Outdoor-weather toggle (only shown when the server has it enabled) ---- */
   .wx-toggle {
@@ -640,11 +685,8 @@ INDEX_HTML = r"""<!doctype html>
   }
 
   /* Chart cards ---------------------------------------------------------- */
-  .card {
-    background:var(--surface); border:1px solid var(--border); border-radius:16px;
-    padding:16px; margin-bottom:16px; box-shadow:var(--shadow); min-width:0;
-  }
-  .card h2 { font-size:.95rem; margin:0 0 2px; font-weight:600; }
+  .card { border-radius:26px; padding:18px; margin-bottom:16px; min-width:0; }
+  .card h2 { font-size:1rem; margin:0 0 2px; font-weight:650; letter-spacing:-.01em; }
   .card .sub { font-size:.74rem; color:var(--muted); }
   .legend { display:flex; flex-wrap:wrap; gap:14px 18px; margin:10px 0 14px; }
   .legend .item { display:flex; align-items:center; gap:8px; font-size:.78rem; }
@@ -655,27 +697,65 @@ INDEX_HTML = r"""<!doctype html>
     .chart-wrap { height:240px; }
     /* Reclaim horizontal space so the charts are wider on phones. */
     body { padding-left:10px; padding-right:10px; }
-    .card { padding:14px 10px; }
+    header { margin-inline:-10px; padding-inline:14px; }
+    .card { padding:16px 12px; }
   }
 
-  /* Daily-average chips ---------------------------------------------------- */
-  .days { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  /* Daily-average history: one month per page, swipe left/right ----------- */
+  .month-nav {
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    margin:14px 0 10px;
+  }
+  .month-nav .lbl { font-weight:650; font-size:.95rem; text-transform:capitalize; }
+  .month-nav .lbl small { display:block; font-size:.7rem; font-weight:500; color:var(--muted); text-transform:none; }
+  .navbtn {
+    width:36px; height:36px; border-radius:50%; flex:none; cursor:pointer;
+    font:inherit; font-size:1.2rem; line-height:1; color:var(--text-1);
+    background:var(--glass-chip); border:1px solid var(--glass-border);
+    box-shadow:var(--glass-hi);
+    transition:transform .2s var(--spring), opacity .2s;
+  }
+  .navbtn:active { transform:scale(.9); }
+  .navbtn:disabled { opacity:.3; cursor:default; }
+  .months {
+    display:flex; overflow-x:auto; overflow-y:hidden;
+    scroll-snap-type:x mandatory; scroll-behavior:smooth;
+    overscroll-behavior-x:contain; scrollbar-width:none;
+    -webkit-overflow-scrolling:touch;
+  }
+  .months::-webkit-scrollbar { display:none; }
+  .month { flex:0 0 100%; min-width:0; scroll-snap-align:start; scroll-snap-stop:always; }
+  .wk, .cal { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:6px; }
+  .wk { margin-bottom:6px; }
+  .wk span { text-align:center; font-size:.66rem; font-weight:600; color:var(--muted); text-transform:uppercase; }
   .day {
     display:flex; flex-direction:column; align-items:center; gap:3px;
-    padding:8px 6px 7px; border-radius:10px; border:1px solid var(--border);
-    min-width:52px; flex:0 0 auto;
+    padding:6px 2px 7px; border-radius:14px; min-width:0;
+    background:var(--glass-chip); border:1px solid var(--glass-border);
   }
-  .day.today { border-color:var(--baseline); }
-  .day .d { font-size:.66rem; color:var(--muted); white-space:nowrap; }
-  .day .t { font-size:.95rem; font-weight:650; font-variant-numeric:tabular-nums; }
-  .day .bar { width:26px; height:4px; border-radius:2px; }
+  .day.empty { background:transparent; border-color:transparent; }
+  .day.today { border-color:var(--s1); box-shadow:0 0 0 1px var(--s1) inset; }
+  .day .d { font-size:.64rem; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .day .t { font-size:.82rem; font-weight:650; font-variant-numeric:tabular-nums; letter-spacing:-.02em; white-space:nowrap; }
+  .day.empty .t { color:var(--muted); font-weight:400; }
+  .day .bar { width:60%; max-width:26px; height:4px; border-radius:2px; }
+  .mdots { display:flex; justify-content:center; gap:6px; margin-top:12px; }
+  .mdots span {
+    width:6px; height:6px; border-radius:3px; background:var(--muted); opacity:.35;
+    transition:width .35s var(--spring), opacity .25s;
+  }
+  .mdots span.on { width:18px; opacity:.9; }
 
   .status-line { font-size:.74rem; color:var(--muted); text-align:center; margin-top:4px; }
   .ios-hint {
-    display:none; font-size:.78rem; color:var(--text-2); background:var(--surface);
-    border:1px solid var(--border); border-radius:12px; padding:10px 14px; margin-bottom:16px;
+    display:none; font-size:.78rem; color:var(--text-2);
+    border-radius:18px; padding:10px 14px; margin-bottom:16px;
   }
   .ios-hint b { color:var(--text-1); }
+  @media (prefers-reduced-motion: reduce) {
+    .ranges .thumb, .mdots span, .navbtn, .ranges button { transition:none; }
+    .months { scroll-behavior:auto; }
+  }
 </style>
 </head>
 <body>
@@ -732,8 +812,14 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 <div class="card" id="dailyCard" style="display:none">
   <h2>Daily average</h2>
-  <div class="sub">Apartment mean temperature, one figure per day</div>
-  <div class="days" id="days"></div>
+  <div class="sub">Apartment mean temperature, one figure per day · swipe for other months</div>
+  <div class="month-nav">
+    <button class="navbtn" id="mPrev" aria-label="Previous month">‹</button>
+    <span class="lbl" id="mLabel"></span>
+    <button class="navbtn" id="mNext" aria-label="Next month">›</button>
+  </div>
+  <div class="months" id="months"></div>
+  <div class="mdots" id="mdots"></div>
 </div>
 
 <p class="status-line" id="status">Loading…</p>
@@ -752,6 +838,9 @@ let displayMode = localStorage.getItem("displayMode") === "avg" ? "avg" : "pods"
 
 const fmtT = (v) => v.toFixed(1) + "°";
 const fmtH = (v) => Math.round(v) + "%";
+// Axis ticks: Chart.js steps in floats (23.8 + 0.1 → 23.900000000000006), so
+// round to 2 decimals and let Number() drop the trailing zeros.
+const tickFmt = (unit) => (v) => Number(v.toFixed(2)) + unit;
 
 // Translucent rgba from a #rrggbb / #rgb token (for the subtle area fill).
 function rgba(hex, a) {
@@ -910,7 +999,7 @@ function baseConfig(fmt, unit) {
           grid: { color: () => css("--grid"), drawTicks: false },
           border: { display: false },
           ticks: { color: () => css("--muted"), font: { size: 11 },
-                   callback: (v) => v + unit }
+                   maxTicksLimit: 7, callback: tickFmt(unit) }
         }
       },
       plugins: {
@@ -1025,7 +1114,7 @@ function cmpConfig() {
           grid: { color: () => css("--grid"), drawTicks: false },
           border: { display: false },
           ticks: { color: () => css("--muted"), font: { size: 11 },
-                   callback: (v) => v + "°" }
+                   maxTicksLimit: 7, callback: tickFmt("°") }
         }
       },
       plugins: {
@@ -1103,12 +1192,13 @@ function tempBin(t) {
   return css("--serious");
 }
 
-function renderDaily(data, homepods) {
-  const card = document.getElementById("dailyCard");
-  const show = ["7d", "30d", "all"].includes(currentRange);
-  card.style.display = show ? "" : "none";
-  if (!show) return;
-  const dayKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+const dayKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+let dailyCache = null;      // { at, ser } — full history, refetched every 10 min
+let dailyMonths = [];       // month keys (yyyymm) of the rendered pages
+let dailyMonth = null;      // month the user is looking at (null → latest)
+
+// Per-day apartment mean: average each pod within the day, then across pods.
+function dailyAverages(data, homepods) {
   const days = new Map();                  // local day -> { pod: [temps] }
   homepods.forEach((name) => (data[name] || []).forEach((p) => {
     const k = dayKey(new Date(p.x));
@@ -1116,36 +1206,133 @@ function renderDaily(data, homepods) {
     (m[name] = m[name] || []).push(p.temp);
     days.set(k, m);
   }));
-  const todayK = dayKey(new Date());
-  document.getElementById("days").innerHTML =
-    [...days.keys()].sort((a, b) => a - b).map((k) => {
-      const pods = Object.values(days.get(k))
-        .map((v) => v.reduce((a, c) => a + c, 0) / v.length);
-      const avg = pods.reduce((a, c) => a + c, 0) / pods.length;
-      const date = new Date(Math.floor(k / 10000), Math.floor(k / 100) % 100 - 1, k % 100);
-      const lbl = k === todayK ? "Today"
-        : date.toLocaleDateString([], { day: "2-digit", month: "short" });
-      return `<span class="day${k === todayK ? " today" : ""}">
-        <span class="d">${lbl}</span>
-        <span class="t">${avg.toFixed(1)}°</span>
-        <span class="bar" style="background:${tempBin(avg)}"></span>
-      </span>`;
-    }).join("");
+  const out = new Map();
+  days.forEach((m, k) => {
+    const pods = Object.values(m).map((v) => v.reduce((a, c) => a + c, 0) / v.length);
+    out.set(k, pods.reduce((a, c) => a + c, 0) / pods.length);
+  });
+  return out;
 }
+
+// One page per month, laid out as a Monday-first calendar; pages sit side by
+// side in a scroll-snap strip so they swipe left/right natively.
+function renderDaily(data, homepods) {
+  const card = document.getElementById("dailyCard");
+  const avgs = dailyAverages(data, homepods);
+  if (!avgs.size) { card.style.display = "none"; return; }
+  card.style.display = "";
+
+  const keys = [...avgs.keys()].sort((a, b) => a - b);
+  const todayK = dayKey(new Date());
+  const lastK = Math.max(keys[keys.length - 1], todayK);
+  dailyMonths = [];
+  for (let ym = Math.floor(keys[0] / 100); ym <= Math.floor(lastK / 100);
+       ym = ym % 100 === 12 ? ym + 89 : ym + 1)
+    dailyMonths.push(ym);
+
+  // Narrow weekday initials, Monday first (2024-01-01 was a Monday).
+  const wk = Array.from({ length: 7 }, (_, i) =>
+    `<span>${new Date(2024, 0, 1 + i).toLocaleDateString([], { weekday: "narrow" })}</span>`).join("");
+
+  const el = document.getElementById("months");
+  el.innerHTML = dailyMonths.map((ym) => {
+    const y = Math.floor(ym / 100), m = ym % 100;
+    const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+    const n = new Date(y, m, 0).getDate();
+    let cells = "<span></span>".repeat(lead);
+    for (let d = 1; d <= n; d++) {
+      const k = ym * 100 + d, v = avgs.get(k);
+      const today = k === todayK ? " today" : "";
+      cells += v == null
+        ? `<span class="day empty${today}"><span class="d">${d}</span><span class="t">–</span></span>`
+        : `<span class="day${today}"><span class="d">${d}</span>
+             <span class="t">${v.toFixed(1)}°</span>
+             <span class="bar" style="background:${tempBin(v)}"></span></span>`;
+    }
+    return `<section class="month"><div class="wk">${wk}</div><div class="cal">${cells}</div></section>`;
+  }).join("");
+
+  document.getElementById("mdots").innerHTML =
+    dailyMonths.length > 1 && dailyMonths.length <= 12 ? "<span></span>".repeat(dailyMonths.length) : "";
+
+  paintMonth(snapMonth(), avgs);
+}
+
+// Jump (no animation) to the month the user was on — kept across refreshes —
+// or to the latest one, which also follows a new month when it starts.
+function snapMonth() {
+  const el = document.getElementById("months");
+  let idx = dailyMonths.indexOf(dailyMonth);
+  if (idx < 0) idx = dailyMonths.length - 1;
+  el.style.scrollBehavior = "auto";
+  el.scrollLeft = idx * el.clientWidth;
+  el.style.scrollBehavior = "";
+  return idx;
+}
+
+let lastAvgs = new Map();
+function paintMonth(idx, avgs) {
+  if (avgs) lastAvgs = avgs;
+  const ym = dailyMonths[idx];
+  if (ym == null) return;
+  const y = Math.floor(ym / 100), m = ym % 100;
+  const vals = [...lastAvgs.entries()].filter(([k]) => Math.floor(k / 100) === ym).map(([, v]) => v);
+  const mean = vals.length ? vals.reduce((a, c) => a + c, 0) / vals.length : null;
+  const name = new Date(y, m - 1, 1).toLocaleDateString([], { month: "long", year: "numeric" });
+  document.getElementById("mLabel").innerHTML = `${name}<small>${
+    mean == null ? "no data" : `avg ${fmtT(mean)} · ${vals.length} day${vals.length > 1 ? "s" : ""}`}</small>`;
+  document.getElementById("mPrev").disabled = idx <= 0;
+  document.getElementById("mNext").disabled = idx >= dailyMonths.length - 1;
+  document.querySelectorAll("#mdots span").forEach((d, i) => d.classList.toggle("on", i === idx));
+}
+
+function monthIndex() {
+  const el = document.getElementById("months");
+  return el.clientWidth ? Math.round(el.scrollLeft / el.clientWidth) : 0;
+}
+
+function goMonth(delta) {
+  const el = document.getElementById("months");
+  const idx = Math.min(Math.max(monthIndex() + delta, 0), dailyMonths.length - 1);
+  el.scrollTo({ left: idx * el.clientWidth });
+}
+
+// Segmented controls: slide the glass "lens" under the active button.
+function paintThumb(group) {
+  let th = group.querySelector(".thumb");
+  if (!th) {
+    th = document.createElement("span");
+    th.className = "thumb";
+    th.style.transition = "none";          // first placement doesn't animate
+    group.prepend(th);
+    requestAnimationFrame(() => requestAnimationFrame(() => { th.style.transition = ""; }));
+  }
+  const a = group.querySelector("button.active");
+  th.style.width = a ? a.offsetWidth + "px" : "0";
+  th.style.transform = `translateX(${a ? a.offsetLeft : 0}px)`;
+}
+const paintThumbs = () => document.querySelectorAll(".ranges").forEach(paintThumb);
 
 async function refresh() {
   const status = document.getElementById("status");
   try {
     // The compare card always needs the last 48h; reuse the main fetch when the
     // selected range already covers it.
-    const [latRes, serRes, ser3Res] = await Promise.all([
+    // The daily history needs the whole record; it changes slowly, so it is
+    // refetched at most every 10 min (or taken from the "All" range).
+    const needDaily = currentRange !== "all" &&
+      (!dailyCache || Date.now() - dailyCache.at > 10 * 60e3);
+    const [latRes, serRes, ser3Res, allRes] = await Promise.all([
       fetch("/api/latest"),
       fetch(`/api/series?range=${currentRange}`),
-      currentRange === "3d" ? null : fetch("/api/series?range=3d")
+      currentRange === "3d" ? null : fetch("/api/series?range=3d"),
+      needDaily ? fetch("/api/series?range=all") : null
     ]);
     const latest = (await latRes.json()).homepods || [];
     const ser = await serRes.json();
     const ser3 = ser3Res ? await ser3Res.json() : ser;
+    if (currentRange === "all") dailyCache = { at: Date.now(), ser };
+    else if (allRes) dailyCache = { at: Date.now(), ser: await allRes.json() };
     const homepods = ser.homepods;
 
     assignColors([...new Set([...latest.map((r) => r.homepod), ...homepods])].sort());
@@ -1170,7 +1357,7 @@ async function refresh() {
     renderLegend("legendTemp", ser.data, homepods, "temp", fmtT);
     renderLegend("legendHum", ser.data, homepods, "humidity", fmtH);
     renderCompare(ser3);
-    renderDaily(ser.data, homepods);
+    renderDaily(dailyCache.ser.data, dailyCache.ser.homepods);
 
     const total = homepods.reduce((n, h) => n + ser.data[h].length, 0);
     status.textContent = homepods.length
@@ -1185,6 +1372,7 @@ function setRange(r, btn) {
   currentRange = r;
   document.querySelectorAll("#ranges button").forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
+  paintThumbs();
   refresh();
 }
 
@@ -1220,8 +1408,10 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // Pods / Average display mode (persisted).
   const modeBtns = document.querySelectorAll("#modes button");
-  const paintMode = () => modeBtns.forEach((b) =>
-    b.classList.toggle("active", b.dataset.mode === displayMode));
+  const paintMode = () => {
+    modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.mode === displayMode));
+    paintThumbs();
+  };
   paintMode();
   modeBtns.forEach((btn) => btn.addEventListener("click", () => {
     displayMode = btn.dataset.mode;
@@ -1229,6 +1419,24 @@ window.addEventListener("DOMContentLoaded", () => {
     paintMode();
     refresh();
   }));
+
+  // Daily history: swipe (native scroll-snap) or the ‹ › buttons.
+  const monthsEl = document.getElementById("months");
+  let curMonth = -1;
+  monthsEl.addEventListener("scroll", () => {
+    const i = monthIndex();
+    if (i === curMonth) return;
+    curMonth = i;
+    dailyMonth = i < dailyMonths.length - 1 ? dailyMonths[i] : null;
+    paintMonth(i);
+  }, { passive: true });
+  document.getElementById("mPrev").addEventListener("click", () => goMonth(-1));
+  document.getElementById("mNext").addEventListener("click", () => goMonth(1));
+  window.addEventListener("resize", () => {
+    paintThumbs();
+    if (dailyMonths.length) snapMonth();
+  });
+  if (document.fonts) document.fonts.ready.then(paintThumbs);
 
   const auto = document.getElementById("auto");
   const startTimer = () => { timer = setInterval(refresh, 60000); };

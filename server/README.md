@@ -64,9 +64,11 @@ Latest known reading per HomePod (feeds the dashboard's live tiles).
   drift with the newest reading; 7d ticks sit on midnights.
 - **Today vs yesterday** — both days' apartment-average temperature overlaid on a
   time-of-day axis, with the Δ compared over the same hours.
-- **Daily averages** (on 7d/30d/all) — one figure per day, color-binned from cold
-  (blue) to hot (red).
-- **Responsive** phone/desktop, **automatic light/dark**.
+- **Daily averages** — one figure per day, color-binned from cold (blue) to hot
+  (red), as a Monday-first calendar with one page per month: swipe left/right
+  (or use ‹ ›) to browse the whole history.
+- **Responsive** phone/desktop, **automatic light/dark**, iOS-style translucent
+  "liquid glass" surfaces.
 - **Installable PWA** (see below) — Chart.js is vendored, so the page needs no CDN.
 - **Optional outdoor-weather backdrop** (Open-Meteo) behind the indoor curves, with
   an on/off toggle — only when `WEATHER_LAT`/`WEATHER_LON` are set on the server.

@@ -27,7 +27,7 @@ to the internet.
   axis pinned to round hours on the short ranges.
 - 📊 **Today vs yesterday** — both days overlaid on a time-of-day axis for a quick
   differential read, plus a **daily-average history** (one color-binned figure per
-  day) on the longer ranges.
+  day) laid out as a monthly calendar you swipe through month by month.
 - ☁️ **Optional outdoor weather** (Open-Meteo) as a recessive backdrop behind the
   indoor curves — off by default, the app stays 100% local unless you opt in.
 - 🌗 **Light & dark**, responsive for phone and desktop, accessible (colorblind-safe

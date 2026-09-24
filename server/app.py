@@ -457,7 +457,7 @@ MANIFEST_JSON = """{
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0d0d0d",
+  "background_color": "#000000",
   "theme_color": "#1c5cab",
   "icons": [
     { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
@@ -467,7 +467,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v4";
+const CACHE = "homepod-logger-v6";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -536,8 +536,8 @@ INDEX_HTML = r"""<!doctype html>
 
 <!-- PWA -->
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="HomePod Log">
@@ -547,170 +547,277 @@ INDEX_HTML = r"""<!doctype html>
 <!-- Vendored Chart.js (no internet access required) -->
 <script src="/static/chart.umd.min.js"></script>
 <style>
+  /* iOS-native look. Content sits on plain grouped cards (systemGroupedBackground
+     + secondarySystemGroupedBackground); the translucent "Liquid Glass" material
+     is reserved for the floating layer — compact nav bar and bottom tab bar —
+     exactly like iOS 26. --surface stays opaque: the canvas halos and tooltips
+     need a solid color. Colors are Apple's system palette. */
   :root {
     color-scheme: light dark;
-    --page:#f9f9f7; --surface:#fcfcfb;
-    --text-1:#0b0b0b; --text-2:#52514e; --muted:#898781;
-    --grid:#e1e0d9; --baseline:#c3c2b7; --border:rgba(11,11,11,.10);
-    --s1:#2a78d6; --s2:#1baf7a; --s3:#eda100; --s4:#008300;
-    --s5:#4a3aa7; --s6:#e34948; --s7:#e87ba4; --s8:#eb6834;
-    --good:#0ca30c; --warning:#c98500; --serious:#d03b3b;
-    --shadow:0 1px 2px rgba(11,11,11,.04), 0 6px 20px rgba(11,11,11,.05);
+    --page:#f2f2f7; --surface:#ffffff;
+    --text-1:#000000; --text-2:#3c3c43; --muted:#8a8a8e;
+    --grid:rgba(60,60,67,.12); --baseline:#c6c6c8; --border:rgba(60,60,67,.18);
+    --tint:#007aff;
+    --s1:#007aff; --s2:#30b0c7; --s3:#ff9500; --s4:#34c759;
+    --s5:#5856d6; --s6:#ff3b30; --s7:#ff2d55; --s8:#a2845e;
+    --good:#34c759; --warning:#ff9500; --serious:#ff3b30;
+    --fill:rgba(118,118,128,.12); --fill-2:rgba(118,118,128,.08);
+    --thumb:#ffffff; --thumb-shadow:0 3px 8px rgba(0,0,0,.12), 0 3px 1px rgba(0,0,0,.04);
+    --glass-bg:rgba(255,255,255,.62); --glass-edge:rgba(255,255,255,.85);
+    --glass-hi:rgba(255,255,255,.9); --glass-sel:rgba(118,118,128,.16);
+    --glass-shadow:0 10px 30px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.06);
+    --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+    --spring:cubic-bezier(.3,1.3,.6,1);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --page:#0d0d0d; --surface:#1a1a19;
-      --text-1:#fff; --text-2:#c3c2b7; --muted:#898781;
-      --grid:#2c2c2a; --baseline:#383835; --border:rgba(255,255,255,.10);
-      --s1:#3987e5; --s2:#199e70; --s3:#c98500; --s4:#008300;
-      --s5:#9085e9; --s6:#e66767; --s7:#d55181; --s8:#d95926;
-      --good:#0ca30c; --warning:#fab219; --serious:#e0554f;
-      --shadow:none;
+      --page:#000000; --surface:#1c1c1e;
+      --text-1:#ffffff; --text-2:#ebebf5; --muted:#8d8d93;
+      --grid:rgba(235,235,245,.10); --baseline:#38383a; --border:rgba(235,235,245,.14);
+      --tint:#0a84ff;
+      --s1:#0a84ff; --s2:#40c8e0; --s3:#ff9f0a; --s4:#30d158;
+      --s5:#5e5ce6; --s6:#ff453a; --s7:#ff375f; --s8:#ac8e68;
+      --good:#30d158; --warning:#ff9f0a; --serious:#ff453a;
+      --fill:rgba(118,118,128,.24); --fill-2:rgba(118,118,128,.16);
+      --thumb:#636366; --thumb-shadow:0 3px 8px rgba(0,0,0,.3);
+      --glass-bg:rgba(37,37,40,.58); --glass-edge:rgba(255,255,255,.14);
+      --glass-hi:rgba(255,255,255,.10); --glass-sel:rgba(255,255,255,.14);
+      --glass-shadow:0 10px 30px rgba(0,0,0,.55);
     }
   }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html { -webkit-text-size-adjust:100%; overflow-x:hidden; }
+  html { -webkit-text-size-adjust:100%; overflow-x:hidden; background:var(--page); }
   body {
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    margin:0; background:var(--page); color:var(--text-1);
-    padding: max(env(safe-area-inset-top), 12px) 16px calc(env(safe-area-inset-bottom) + 24px);
-    max-width:1040px; margin-inline:auto; line-height:1.4; overflow-x:hidden;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+    margin:0 auto; background:var(--page); color:var(--text-1);
+    padding: calc(env(safe-area-inset-top) + 8px) 16px calc(env(safe-area-inset-bottom) + 96px);
+    max-width:1040px; line-height:1.35; overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
   }
   canvas { max-width:100%; }
-  header {
-    display:flex; align-items:center; justify-content:space-between;
-    gap:12px; padding:8px 0 16px;
-  }
-  .brand { display:flex; align-items:center; gap:10px; }
-  .brand img { width:34px; height:34px; border-radius:8px; }
-  .brand h1 { font-size:1.15rem; margin:0; font-weight:650; letter-spacing:-.01em; }
-  .brand .sub { font-size:.72rem; color:var(--muted); }
-  .refresh {
-    display:flex; align-items:center; gap:6px; font-size:.78rem; color:var(--text-2);
-    cursor:pointer; user-select:none;
-  }
-  .refresh input { accent-color:var(--s1); width:16px; height:16px; }
+  button { font:inherit; }
 
-  /* Live tiles ----------------------------------------------------------- */
-  .tiles { display:grid; gap:12px; grid-template-columns:1fr; margin-bottom:20px; }
-  @media (min-width:560px){ .tiles { grid-template-columns:1fr 1fr; } }
-  .tile {
-    background:var(--surface); border:1px solid var(--border); border-radius:16px;
-    padding:16px; box-shadow:var(--shadow); min-width:0;
+  /* Liquid Glass material (floating layer only). */
+  .glass {
+    background:var(--glass-bg);
+    -webkit-backdrop-filter:blur(24px) saturate(190%);
+    backdrop-filter:blur(24px) saturate(190%);
+    box-shadow:inset 0 0 0 .5px var(--glass-edge), inset 0 1px 0 var(--glass-hi), var(--glass-shadow);
   }
-  .tile .top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
-  .tile .name { display:flex; align-items:center; gap:8px; font-weight:600; font-size:.95rem; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .dot { width:11px; height:11px; border-radius:50%; flex:none; }
+
+  /* Compact nav bar: fades in once the large title scrolls away. */
+  .topbar {
+    position:fixed; top:0; left:0; right:0; z-index:30;
+    padding:env(safe-area-inset-top) 16px 0; height:calc(env(safe-area-inset-top) + 44px);
+    display:flex; align-items:center; justify-content:center;
+    font-size:17px; font-weight:600;
+    background:var(--glass-bg);
+    -webkit-backdrop-filter:blur(24px) saturate(190%);
+    backdrop-filter:blur(24px) saturate(190%);
+    border-bottom:.5px solid var(--border);
+    opacity:0; pointer-events:none; transition:opacity .2s;
+  }
+  .topbar.show { opacity:1; }
+
+  /* Large title. */
+  header {
+    display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
+    padding:8px 4px 16px;
+  }
+  header h1 { font-size:clamp(26px, 8.2vw, 34px); white-space:nowrap; line-height:1.1; margin:0; font-weight:700; letter-spacing:-.02em; }
+  header .sub { font-size:15px; color:var(--muted); margin-top:2px; }
+  .switch-row {
+    display:flex; align-items:center; gap:8px; font-size:15px; color:var(--muted);
+    cursor:pointer; user-select:none; padding-bottom:2px;
+  }
+
+  /* iOS switch. */
+  .switch {
+    -webkit-appearance:none; appearance:none; margin:0; flex:none; cursor:pointer;
+    position:relative; width:51px; height:31px; border-radius:999px;
+    background:var(--fill); transition:background .25s;
+  }
+  .switch::before {
+    content:""; position:absolute; top:2px; left:2px; width:27px; height:27px;
+    border-radius:50%; background:#fff;
+    box-shadow:0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16);
+    transition:transform .3s var(--spring), width .2s;
+  }
+  .switch:checked { background:var(--good); }
+  .switch:checked::before { transform:translateX(20px); }
+  .switch:active::before { width:31px; }
+  .switch:checked:active::before { transform:translateX(16px); }
+
+  /* Live tiles (one compact card per pod, side by side on phones) ------------ */
+  .tiles { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(158px, 1fr)); margin-bottom:12px; }
+  .tile { background:var(--surface); border-radius:22px; padding:14px 16px 14px; min-width:0; }
+  .tile .name { display:flex; align-items:center; gap:7px; font-weight:600; font-size:15px; min-width:0; }
+  .tile .name span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dot { width:10px; height:10px; border-radius:50%; flex:none; }
+  .tile .temp {
+    font-family:var(--rounded); font-size:44px; font-weight:500; line-height:1;
+    letter-spacing:-.02em; margin:10px 0 4px; font-variant-numeric:tabular-nums;
+  }
+  .tile .hum { font-size:15px; color:var(--text-2); font-variant-numeric:tabular-nums; }
+  .tile .hum b { font-weight:600; color:var(--text-1); }
+  .tile .foot { display:flex; align-items:center; justify-content:space-between; gap:6px; margin-top:12px; }
   .chip {
-    display:inline-flex; align-items:center; gap:5px; font-size:.72rem; font-weight:600;
-    padding:3px 9px; border-radius:999px; border:1px solid var(--border); white-space:nowrap;
+    display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:600;
+    padding:3px 8px; border-radius:999px; white-space:nowrap;
+    background:color-mix(in srgb, currentColor 14%, transparent);
   }
-  .chip .ico { font-size:.8em; }
-  .metrics { display:flex; gap:22px; }
-  .metric .k { font-size:.72rem; color:var(--muted); margin-bottom:2px; }
-  .metric .v { font-size:2rem; font-weight:650; letter-spacing:-.02em; line-height:1; }
-  .metric .v small { font-size:.9rem; font-weight:500; color:var(--text-2); }
-  .tile .when { margin-top:12px; font-size:.72rem; color:var(--muted); }
+  .tile .when { font-size:12px; color:var(--muted); white-space:nowrap; }
   .tile .when.stale { color:var(--serious); font-weight:600; }
 
-  /* Range selector ------------------------------------------------------- */
-  .controls {
-    display:flex; align-items:center; justify-content:space-between;
-    gap:12px 16px; flex-wrap:wrap; margin-bottom:16px;
+  /* Segmented controls ----------------------------------------------------- */
+  .seg {
+    position:relative; display:flex; border-radius:999px; padding:2px;
+    background:var(--fill);
   }
-  .ranges {
-    display:inline-flex; background:var(--surface); border:1px solid var(--border);
-    border-radius:12px; padding:3px; gap:2px;
+  .seg button {
+    position:relative; z-index:1; flex:1 1 0; min-width:0;
+    font-size:13px; font-weight:500; border:0; background:transparent;
+    color:var(--text-1); height:30px; padding:0 10px; border-radius:999px; cursor:pointer;
   }
-  .ranges button {
-    font:inherit; font-size:.82rem; font-weight:550; border:0; background:transparent;
-    color:var(--text-2); padding:7px 14px; border-radius:9px; cursor:pointer;
+  .seg button.active { font-weight:600; }
+  .seg .thumb {
+    position:absolute; top:2px; bottom:2px; left:0; width:0; border-radius:999px;
+    background:var(--thumb); box-shadow:var(--thumb-shadow);
+    transition:transform .4s var(--spring), width .4s var(--spring), scale .25s var(--spring);
+    pointer-events:none;
   }
-  .ranges button.active { background:var(--s1); color:#fff; }
+  .seg.pressing .thumb { scale:1.06; }
 
-  /* Outdoor-weather toggle (only shown when the server has it enabled) ---- */
-  .wx-toggle {
-    display:none; align-items:center; gap:7px; font-size:.78rem;
-    color:var(--text-2); cursor:pointer; user-select:none;
+  .controls {
+    display:flex; align-items:center; gap:12px 16px; flex-wrap:wrap; margin:4px 0 12px;
   }
-  .wx-toggle input { accent-color:var(--s1); width:16px; height:16px; }
+  .controls .seg { flex:1 1 220px; }
+  .wx-toggle {
+    display:none; align-items:center; gap:8px; font-size:15px;
+    color:var(--text-1); cursor:pointer; user-select:none; margin-left:auto;
+  }
   .wx-swatch {
     width:15px; height:11px; border-radius:3px; flex:none;
-    background:var(--grid); border:1px solid var(--baseline);
+    background:var(--grid); border:1px dashed var(--baseline);
   }
 
-  /* Chart cards ---------------------------------------------------------- */
-  .card {
-    background:var(--surface); border:1px solid var(--border); border-radius:16px;
-    padding:16px; margin-bottom:16px; box-shadow:var(--shadow); min-width:0;
+  /* Floating Liquid Glass tab bar: the range picker. ----------------------- */
+  .tabbar {
+    position:fixed; z-index:30; left:50%; transform:translateX(-50%);
+    bottom:calc(env(safe-area-inset-bottom) + 12px);
+    width:min(calc(100% - 32px), 420px);
+    display:flex; padding:4px; border-radius:999px;
   }
-  .card h2 { font-size:.95rem; margin:0 0 2px; font-weight:600; }
-  .card .sub { font-size:.74rem; color:var(--muted); }
-  .legend { display:flex; flex-wrap:wrap; gap:14px 18px; margin:10px 0 14px; }
-  .legend .item { display:flex; align-items:center; gap:8px; font-size:.78rem; }
+  .tabbar button {
+    position:relative; z-index:1; flex:1 1 0; height:46px; border:0; border-radius:999px;
+    background:transparent; color:var(--text-1); font-size:15px; font-weight:600;
+    cursor:pointer; transition:color .2s;
+  }
+  .tabbar button.active { color:var(--tint); }
+  .tabbar .thumb {
+    position:absolute; top:4px; bottom:4px; left:0; width:0; border-radius:999px;
+    background:var(--glass-sel);
+    transition:transform .45s var(--spring), width .45s var(--spring), scale .25s var(--spring);
+    pointer-events:none;
+  }
+  .tabbar.pressing .thumb { scale:1.12; }
+
+  /* Cards ---------------------------------------------------------------- */
+  .card { background:var(--surface); border-radius:22px; padding:16px; margin-bottom:12px; min-width:0; }
+  .card h2 { font-size:17px; margin:0 0 2px; font-weight:600; letter-spacing:-.01em; }
+  .card .sub { font-size:13px; color:var(--muted); }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 16px; margin:8px 0 12px; }
+  .legend .item { display:flex; align-items:center; gap:6px; font-size:13px; }
   .legend .item .lbl { font-weight:600; color:var(--text-1); }
   .legend .item .stat { color:var(--muted); font-variant-numeric:tabular-nums; }
   .chart-wrap { position:relative; height:280px; }
   @media (max-width:500px){
     .chart-wrap { height:240px; }
-    /* Reclaim horizontal space so the charts are wider on phones. */
-    body { padding-left:10px; padding-right:10px; }
-    .card { padding:14px 10px; }
+    .card { padding:16px 12px 12px; }
+    .card h2, .card .sub, .legend { padding-inline:4px; }
   }
 
-  /* Daily-average chips ---------------------------------------------------- */
-  .days { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  /* Daily-average history: one month per page, swipe left/right ----------- */
+  .month-nav {
+    display:grid; grid-template-columns:34px 1fr 34px; align-items:center; gap:8px;
+    margin:14px 0 12px; text-align:center;
+  }
+  .month-nav .lbl { font-weight:600; font-size:17px; }
+  .month-nav .lbl::first-letter { text-transform:uppercase; }
+  .month-nav .lbl small { display:block; font-size:13px; font-weight:400; color:var(--muted); }
+  .navbtn {
+    width:34px; height:34px; border-radius:50%; border:0; padding:0; cursor:pointer;
+    display:grid; place-items:center; color:var(--tint); background:var(--fill);
+    transition:transform .2s var(--spring), opacity .2s;
+  }
+  .navbtn svg { width:18px; height:18px; }
+  .navbtn:active { transform:scale(.88); }
+  .navbtn:disabled { opacity:.35; cursor:default; }
+  .months {
+    display:flex; overflow-x:auto; overflow-y:hidden;
+    scroll-snap-type:x mandatory; scroll-behavior:smooth;
+    overscroll-behavior-x:contain; scrollbar-width:none;
+  }
+  .months::-webkit-scrollbar { display:none; }
+  .month { flex:0 0 100%; min-width:0; scroll-snap-align:start; scroll-snap-stop:always; }
+  .wk, .cal { display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:5px; }
+  .wk { margin-bottom:6px; }
+  .wk span { text-align:center; font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; }
   .day {
     display:flex; flex-direction:column; align-items:center; gap:3px;
-    padding:8px 6px 7px; border-radius:10px; border:1px solid var(--border);
-    min-width:52px; flex:0 0 auto;
+    padding:6px 0 7px; border-radius:12px; min-width:0; background:var(--fill-2);
   }
-  .day.today { border-color:var(--baseline); }
-  .day .d { font-size:.66rem; color:var(--muted); white-space:nowrap; }
-  .day .t { font-size:.95rem; font-weight:650; font-variant-numeric:tabular-nums; }
-  .day .bar { width:26px; height:4px; border-radius:2px; }
+  .day.empty { background:transparent; }
+  .day.today { background:color-mix(in srgb, var(--tint) 16%, transparent); }
+  .day.today .d { color:var(--tint); font-weight:700; }
+  .day .d { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .day .t { font-size:13px; font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-.02em; white-space:nowrap; }
+  .day.empty .t { color:var(--muted); font-weight:400; }
+  .day .bar { width:55%; max-width:24px; height:4px; border-radius:2px; }
+  .mdots { display:flex; justify-content:center; gap:6px; margin-top:12px; }
+  .mdots span {
+    width:7px; height:7px; border-radius:4px; background:var(--text-1); opacity:.2;
+    transition:width .35s var(--spring), opacity .25s;
+  }
+  .mdots span.on { width:18px; opacity:.75; }
 
-  .status-line { font-size:.74rem; color:var(--muted); text-align:center; margin-top:4px; }
+  .status-line { font-size:12px; color:var(--muted); text-align:center; margin-top:4px; }
   .ios-hint {
-    display:none; font-size:.78rem; color:var(--text-2); background:var(--surface);
-    border:1px solid var(--border); border-radius:12px; padding:10px 14px; margin-bottom:16px;
+    display:none; font-size:15px; color:var(--text-2); background:var(--surface);
+    border-radius:18px; padding:12px 16px; margin-bottom:12px;
   }
-  .ios-hint b { color:var(--text-1); }
+  .ios-hint b { color:var(--text-1); font-weight:600; }
+  @media (prefers-reduced-motion: reduce) {
+    .seg .thumb, .tabbar .thumb, .mdots span, .navbtn, .switch::before { transition:none; }
+    .months { scroll-behavior:auto; }
+  }
 </style>
 </head>
 <body>
+<nav class="topbar" id="topbar" aria-hidden="true">HomePod Logger</nav>
+
 <header>
-  <div class="brand">
-    <img src="/static/icon-192.png" alt="">
-    <div>
-      <h1>HomePod Logger</h1>
-      <div class="sub">Temperature &amp; humidity</div>
-    </div>
+  <div>
+    <h1>HomePod Logger</h1>
+    <div class="sub">Temperature &amp; humidity</div>
   </div>
-  <label class="refresh"><input type="checkbox" id="auto" checked> auto</label>
+  <label class="switch-row">Auto <input type="checkbox" class="switch" id="auto" checked></label>
 </header>
 
 <div class="ios-hint" id="iosHint">
-  📲 Tip: <b>Share</b> → <b>Add to Home Screen</b> to install the app.
+  Tip: <b>Share</b> → <b>Add to Home Screen</b> to install the app.
 </div>
 
 <section class="tiles" id="tiles"></section>
 
 <div class="controls">
-  <div class="ranges" id="ranges">
-    <button data-range="24h" class="active">24h</button>
-    <button data-range="3d">3d</button>
-    <button data-range="7d">7d</button>
-    <button data-range="30d">30d</button>
-    <button data-range="all">All</button>
-  </div>
-  <div class="ranges" id="modes">
+  <div class="seg" id="modes">
     <button data-mode="pods">Pods</button>
     <button data-mode="avg">Average</button>
   </div>
   <label class="wx-toggle" id="wxToggle">
-    <input type="checkbox" id="wx" checked>
-    <span class="wx-swatch"></span> Outdoor weather
+    <span class="wx-swatch"></span> Outdoor
+    <input type="checkbox" class="switch" id="wx" checked>
   </label>
 </div>
 
@@ -732,11 +839,25 @@ INDEX_HTML = r"""<!doctype html>
 </div>
 <div class="card" id="dailyCard" style="display:none">
   <h2>Daily average</h2>
-  <div class="sub">Apartment mean temperature, one figure per day</div>
-  <div class="days" id="days"></div>
+  <div class="sub">Apartment mean temperature · swipe for other months</div>
+  <div class="month-nav">
+    <button class="navbtn" id="mPrev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <span class="lbl" id="mLabel"></span>
+    <button class="navbtn" id="mNext" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+  </div>
+  <div class="months" id="months"></div>
+  <div class="mdots" id="mdots"></div>
 </div>
 
 <p class="status-line" id="status">Loading…</p>
+
+<nav class="tabbar glass" id="ranges" aria-label="Time range">
+  <button data-range="24h" class="active">24h</button>
+  <button data-range="3d">3d</button>
+  <button data-range="7d">7d</button>
+  <button data-range="30d">30d</button>
+  <button data-range="all">All</button>
+</nav>
 
 <script>
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -752,6 +873,9 @@ let displayMode = localStorage.getItem("displayMode") === "avg" ? "avg" : "pods"
 
 const fmtT = (v) => v.toFixed(1) + "°";
 const fmtH = (v) => Math.round(v) + "%";
+// Axis ticks: Chart.js steps in floats (23.8 + 0.1 → 23.900000000000006), so
+// round to 2 decimals and let Number() drop the trailing zeros.
+const tickFmt = (unit) => (v) => Number(v.toFixed(2)) + unit;
 
 // Translucent rgba from a #rrggbb / #rgb token (for the subtle area fill).
 function rgba(hex, a) {
@@ -796,15 +920,13 @@ function renderTiles(items) {
     const stale = isStale(r.ts);
     return `
       <div class="tile">
-        <div class="top">
-          <span class="name"><span class="dot" style="background:${colorMap[r.homepod]}"></span>${r.homepod}</span>
-          <span class="chip" style="color:${c.v}"><span class="ico">${c.ico}</span>${c.lbl}</span>
+        <div class="name"><span class="dot" style="background:${colorMap[r.homepod]}"></span><span>${r.homepod}</span></div>
+        <div class="temp">${fmtT(r.temp)}</div>
+        <div class="hum">Humidity <b>${Math.round(r.humidity)}%</b></div>
+        <div class="foot">
+          <span class="chip" style="color:${c.v}">${c.ico} ${c.lbl}</span>
+          <span class="when ${stale ? "stale" : ""}">${ago(r.ts)}</span>
         </div>
-        <div class="metrics">
-          <div class="metric"><div class="k">Temperature</div><div class="v">${fmtT(r.temp)}<small>C</small></div></div>
-          <div class="metric"><div class="k">Humidity</div><div class="v">${Math.round(r.humidity)}<small>%</small></div></div>
-        </div>
-        <div class="when ${stale ? "stale" : ""}">${ago(r.ts)}</div>
       </div>`;
   }).join("");
 }
@@ -910,7 +1032,7 @@ function baseConfig(fmt, unit) {
           grid: { color: () => css("--grid"), drawTicks: false },
           border: { display: false },
           ticks: { color: () => css("--muted"), font: { size: 11 },
-                   callback: (v) => v + unit }
+                   maxTicksLimit: 7, callback: tickFmt(unit) }
         }
       },
       plugins: {
@@ -1025,7 +1147,7 @@ function cmpConfig() {
           grid: { color: () => css("--grid"), drawTicks: false },
           border: { display: false },
           ticks: { color: () => css("--muted"), font: { size: 11 },
-                   callback: (v) => v + "°" }
+                   maxTicksLimit: 7, callback: tickFmt("°") }
         }
       },
       plugins: {
@@ -1103,12 +1225,13 @@ function tempBin(t) {
   return css("--serious");
 }
 
-function renderDaily(data, homepods) {
-  const card = document.getElementById("dailyCard");
-  const show = ["7d", "30d", "all"].includes(currentRange);
-  card.style.display = show ? "" : "none";
-  if (!show) return;
-  const dayKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+const dayKey = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+let dailyCache = null;      // { at, ser } — full history, refetched every 10 min
+let dailyMonths = [];       // month keys (yyyymm) of the rendered pages
+let dailyMonth = null;      // month the user is looking at (null → latest)
+
+// Per-day apartment mean: average each pod within the day, then across pods.
+function dailyAverages(data, homepods) {
   const days = new Map();                  // local day -> { pod: [temps] }
   homepods.forEach((name) => (data[name] || []).forEach((p) => {
     const k = dayKey(new Date(p.x));
@@ -1116,36 +1239,133 @@ function renderDaily(data, homepods) {
     (m[name] = m[name] || []).push(p.temp);
     days.set(k, m);
   }));
-  const todayK = dayKey(new Date());
-  document.getElementById("days").innerHTML =
-    [...days.keys()].sort((a, b) => a - b).map((k) => {
-      const pods = Object.values(days.get(k))
-        .map((v) => v.reduce((a, c) => a + c, 0) / v.length);
-      const avg = pods.reduce((a, c) => a + c, 0) / pods.length;
-      const date = new Date(Math.floor(k / 10000), Math.floor(k / 100) % 100 - 1, k % 100);
-      const lbl = k === todayK ? "Today"
-        : date.toLocaleDateString([], { day: "2-digit", month: "short" });
-      return `<span class="day${k === todayK ? " today" : ""}">
-        <span class="d">${lbl}</span>
-        <span class="t">${avg.toFixed(1)}°</span>
-        <span class="bar" style="background:${tempBin(avg)}"></span>
-      </span>`;
-    }).join("");
+  const out = new Map();
+  days.forEach((m, k) => {
+    const pods = Object.values(m).map((v) => v.reduce((a, c) => a + c, 0) / v.length);
+    out.set(k, pods.reduce((a, c) => a + c, 0) / pods.length);
+  });
+  return out;
 }
+
+// One page per month, laid out as a Monday-first calendar; pages sit side by
+// side in a scroll-snap strip so they swipe left/right natively.
+function renderDaily(data, homepods) {
+  const card = document.getElementById("dailyCard");
+  const avgs = dailyAverages(data, homepods);
+  if (!avgs.size) { card.style.display = "none"; return; }
+  card.style.display = "";
+
+  const keys = [...avgs.keys()].sort((a, b) => a - b);
+  const todayK = dayKey(new Date());
+  const lastK = Math.max(keys[keys.length - 1], todayK);
+  dailyMonths = [];
+  for (let ym = Math.floor(keys[0] / 100); ym <= Math.floor(lastK / 100);
+       ym = ym % 100 === 12 ? ym + 89 : ym + 1)
+    dailyMonths.push(ym);
+
+  // Narrow weekday initials, Monday first (2024-01-01 was a Monday).
+  const wk = Array.from({ length: 7 }, (_, i) =>
+    `<span>${new Date(2024, 0, 1 + i).toLocaleDateString([], { weekday: "narrow" })}</span>`).join("");
+
+  const el = document.getElementById("months");
+  el.innerHTML = dailyMonths.map((ym) => {
+    const y = Math.floor(ym / 100), m = ym % 100;
+    const lead = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+    const n = new Date(y, m, 0).getDate();
+    let cells = "<span></span>".repeat(lead);
+    for (let d = 1; d <= n; d++) {
+      const k = ym * 100 + d, v = avgs.get(k);
+      const today = k === todayK ? " today" : "";
+      cells += v == null
+        ? `<span class="day empty${today}"><span class="d">${d}</span><span class="t">–</span></span>`
+        : `<span class="day${today}"><span class="d">${d}</span>
+             <span class="t">${v.toFixed(1)}°</span>
+             <span class="bar" style="background:${tempBin(v)}"></span></span>`;
+    }
+    return `<section class="month"><div class="wk">${wk}</div><div class="cal">${cells}</div></section>`;
+  }).join("");
+
+  document.getElementById("mdots").innerHTML =
+    dailyMonths.length > 1 && dailyMonths.length <= 12 ? "<span></span>".repeat(dailyMonths.length) : "";
+
+  paintMonth(snapMonth(), avgs);
+}
+
+// Jump (no animation) to the month the user was on — kept across refreshes —
+// or to the latest one, which also follows a new month when it starts.
+function snapMonth() {
+  const el = document.getElementById("months");
+  let idx = dailyMonths.indexOf(dailyMonth);
+  if (idx < 0) idx = dailyMonths.length - 1;
+  el.style.scrollBehavior = "auto";
+  el.scrollLeft = idx * el.clientWidth;
+  el.style.scrollBehavior = "";
+  return idx;
+}
+
+let lastAvgs = new Map();
+function paintMonth(idx, avgs) {
+  if (avgs) lastAvgs = avgs;
+  const ym = dailyMonths[idx];
+  if (ym == null) return;
+  const y = Math.floor(ym / 100), m = ym % 100;
+  const vals = [...lastAvgs.entries()].filter(([k]) => Math.floor(k / 100) === ym).map(([, v]) => v);
+  const mean = vals.length ? vals.reduce((a, c) => a + c, 0) / vals.length : null;
+  const name = new Date(y, m - 1, 1).toLocaleDateString([], { month: "long", year: "numeric" });
+  document.getElementById("mLabel").innerHTML = `${name}<small>${
+    mean == null ? "no data" : `avg ${fmtT(mean)} · ${vals.length} day${vals.length > 1 ? "s" : ""}`}</small>`;
+  document.getElementById("mPrev").disabled = idx <= 0;
+  document.getElementById("mNext").disabled = idx >= dailyMonths.length - 1;
+  document.querySelectorAll("#mdots span").forEach((d, i) => d.classList.toggle("on", i === idx));
+}
+
+function monthIndex() {
+  const el = document.getElementById("months");
+  return el.clientWidth ? Math.round(el.scrollLeft / el.clientWidth) : 0;
+}
+
+function goMonth(delta) {
+  const el = document.getElementById("months");
+  const idx = Math.min(Math.max(monthIndex() + delta, 0), dailyMonths.length - 1);
+  el.scrollTo({ left: idx * el.clientWidth });
+}
+
+// Segmented controls: slide the glass "lens" under the active button.
+function paintThumb(group) {
+  let th = group.querySelector(".thumb");
+  if (!th) {
+    th = document.createElement("span");
+    th.className = "thumb";
+    th.style.transition = "none";          // first placement doesn't animate
+    group.prepend(th);
+    requestAnimationFrame(() => requestAnimationFrame(() => { th.style.transition = ""; }));
+  }
+  const a = group.querySelector("button.active");
+  th.style.width = a ? a.offsetWidth + "px" : "0";
+  th.style.transform = `translateX(${a ? a.offsetLeft : 0}px)`;
+}
+const paintThumbs = () => document.querySelectorAll(".seg, .tabbar").forEach(paintThumb);
 
 async function refresh() {
   const status = document.getElementById("status");
   try {
     // The compare card always needs the last 48h; reuse the main fetch when the
     // selected range already covers it.
-    const [latRes, serRes, ser3Res] = await Promise.all([
+    // The daily history needs the whole record; it changes slowly, so it is
+    // refetched at most every 10 min (or taken from the "All" range).
+    const needDaily = currentRange !== "all" &&
+      (!dailyCache || Date.now() - dailyCache.at > 10 * 60e3);
+    const [latRes, serRes, ser3Res, allRes] = await Promise.all([
       fetch("/api/latest"),
       fetch(`/api/series?range=${currentRange}`),
-      currentRange === "3d" ? null : fetch("/api/series?range=3d")
+      currentRange === "3d" ? null : fetch("/api/series?range=3d"),
+      needDaily ? fetch("/api/series?range=all") : null
     ]);
     const latest = (await latRes.json()).homepods || [];
     const ser = await serRes.json();
     const ser3 = ser3Res ? await ser3Res.json() : ser;
+    if (currentRange === "all") dailyCache = { at: Date.now(), ser };
+    else if (allRes) dailyCache = { at: Date.now(), ser: await allRes.json() };
     const homepods = ser.homepods;
 
     assignColors([...new Set([...latest.map((r) => r.homepod), ...homepods])].sort());
@@ -1170,7 +1390,7 @@ async function refresh() {
     renderLegend("legendTemp", ser.data, homepods, "temp", fmtT);
     renderLegend("legendHum", ser.data, homepods, "humidity", fmtH);
     renderCompare(ser3);
-    renderDaily(ser.data, homepods);
+    renderDaily(dailyCache.ser.data, dailyCache.ser.homepods);
 
     const total = homepods.reduce((n, h) => n + ser.data[h].length, 0);
     status.textContent = homepods.length
@@ -1185,6 +1405,7 @@ function setRange(r, btn) {
   currentRange = r;
   document.querySelectorAll("#ranges button").forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
+  paintThumbs();
   refresh();
 }
 
@@ -1199,6 +1420,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   if (hm === "avg" || hm === "pods") displayMode = hm;
 
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
   tempChart = new Chart(document.getElementById("tempChart"), baseConfig(fmtT, "°"));
   humChart = new Chart(document.getElementById("humChart"), baseConfig(fmtH, "%"));
   cmpChart = new Chart(document.getElementById("cmpChart"), cmpConfig());
@@ -1220,8 +1442,10 @@ window.addEventListener("DOMContentLoaded", () => {
 
   // Pods / Average display mode (persisted).
   const modeBtns = document.querySelectorAll("#modes button");
-  const paintMode = () => modeBtns.forEach((b) =>
-    b.classList.toggle("active", b.dataset.mode === displayMode));
+  const paintMode = () => {
+    modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.mode === displayMode));
+    paintThumbs();
+  };
   paintMode();
   modeBtns.forEach((btn) => btn.addEventListener("click", () => {
     displayMode = btn.dataset.mode;
@@ -1229,6 +1453,37 @@ window.addEventListener("DOMContentLoaded", () => {
     paintMode();
     refresh();
   }));
+
+  // Daily history: swipe (native scroll-snap) or the ‹ › buttons.
+  const monthsEl = document.getElementById("months");
+  let curMonth = -1;
+  monthsEl.addEventListener("scroll", () => {
+    const i = monthIndex();
+    if (i === curMonth) return;
+    curMonth = i;
+    dailyMonth = i < dailyMonths.length - 1 ? dailyMonths[i] : null;
+    paintMonth(i);
+  }, { passive: true });
+  document.getElementById("mPrev").addEventListener("click", () => goMonth(-1));
+  document.getElementById("mNext").addEventListener("click", () => goMonth(1));
+  window.addEventListener("resize", () => {
+    paintThumbs();
+    if (dailyMonths.length) snapMonth();
+  });
+  if (document.fonts) document.fonts.ready.then(paintThumbs);
+
+  // Liquid-glass "lens": the selection capsule swells while a finger is down.
+  document.querySelectorAll(".seg, .tabbar").forEach((g) => {
+    const off = () => g.classList.remove("pressing");
+    g.addEventListener("pointerdown", () => g.classList.add("pressing"));
+    ["pointerup", "pointercancel", "pointerleave"].forEach((e) => g.addEventListener(e, off));
+  });
+
+  // Compact glass nav bar once the large title has scrolled away.
+  const topbar = document.getElementById("topbar");
+  const onScroll = () => topbar.classList.toggle("show", scrollY > 48);
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
 
   const auto = document.getElementById("auto");
   const startTimer = () => { timer = setInterval(refresh, 60000); };

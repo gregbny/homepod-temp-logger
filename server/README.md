@@ -71,8 +71,10 @@ Latest known reading per HomePod (feeds the dashboard's live tiles).
   grouped cards, large title, system switches/segmented control, and a floating
   Liquid Glass tab bar for the time range.
 - **Installable PWA** (see below) — Chart.js is vendored, so the page needs no CDN.
-- **Optional outdoor-weather backdrop** (Open-Meteo) behind the indoor curves, with
-  an on/off toggle — only when `WEATHER_LAT`/`WEATHER_LON` are set on the server.
+- **Optional outdoor-weather backdrop** (Open-Meteo, hourly) behind the indoor
+  curves, on its own right-hand axis so the indoor axis keeps its resolution; the
+  legend gives the outdoor range and the average indoor–outdoor gap. On/off
+  toggle — only when `WEATHER_LAT`/`WEATHER_LON` are set on the server.
 
 ### `GET /manifest.webmanifest` · `GET /sw.js`
 PWA manifest and service worker (caches the shell + data). Served at root so the

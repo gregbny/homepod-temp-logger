@@ -471,7 +471,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v7";
+const CACHE = "homepod-logger-v8";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -993,6 +993,30 @@ Chart.Interaction.modes.nearestEach = (chart, e) => {
   return hits;
 };
 
+// Touch tooltips must close when the finger lifts, but two things re-open them:
+//  1. After a tap, iOS (and Chromium) fire emulated mouse events — mousemove,
+//     mousedown, click — a few ms after touchend; Chart.js reads them as hover.
+//  2. Chart.js defers event handling to the next animation frame, so on a
+//     quick tap the touchstart is processed *after* our touchend dismissal.
+// Either way nothing closes it again (a phone never sends mouseout), so it
+// sticks. Rule: around a touch, Chart.js only sees genuine touch events, and
+// only while a finger is actually down. A real mouse is unaffected. (Test the
+// native type — Chart.js renames touchmove to "mousemove" internally.)
+let lastTouch = 0, fingerDown = false;
+["touchstart", "touchmove", "touchend", "touchcancel"].forEach((t) =>
+  window.addEventListener(t, (e) => {
+    lastTouch = Date.now();
+    fingerDown = e.touches.length > 0;
+  }, { capture: true, passive: true }));
+Chart.register({
+  id: "touchGuard",
+  beforeEvent(chart, args) {
+    const native = args.event.native;
+    if (!native || Date.now() - lastTouch > 1000) return;
+    if (!(fingerDown && native.type.startsWith("touch"))) return false;
+  }
+});
+
 // Fixed, hour-aligned x windows on the short ranges so the axis reads the same
 // whenever you open the app, instead of drifting with the newest reading.
 function xBounds() {
@@ -1507,16 +1531,22 @@ window.addEventListener("DOMContentLoaded", () => {
   cmpChart = new Chart(document.getElementById("cmpChart"), cmpConfig());
 
   // Touch: show the tooltip only while a finger is down, then dismiss it —
-  // otherwise the panel sticks around after a tap and eats the screen.
+  // otherwise the panel sticks around after a tap and eats the screen. The
+  // touchGuard plugin keeps iOS's trailing emulated mouse events from
+  // re-opening it; tapping anywhere else also closes it, as in iOS.
+  const charts = [tempChart, humChart, cmpChart];
   const dismiss = (ch) => {
+    if (!ch.tooltip || !ch.tooltip.getActiveElements().length) return;
     ch.setActiveElements([]);
-    if (ch.tooltip) ch.tooltip.setActiveElements([], { x: 0, y: 0 });
-    ch.update();
+    ch.tooltip.setActiveElements([], { x: 0, y: 0 });
+    ch.update("none");
   };
-  [tempChart, humChart, cmpChart].forEach((ch) => {
+  charts.forEach((ch) => {
     ch.canvas.addEventListener("touchend", () => dismiss(ch), { passive: true });
     ch.canvas.addEventListener("touchcancel", () => dismiss(ch), { passive: true });
   });
+  document.addEventListener("touchstart", (e) =>
+    charts.forEach((ch) => { if (e.target !== ch.canvas) dismiss(ch); }), { passive: true });
 
   document.querySelectorAll("#ranges button").forEach((btn) =>
     btn.addEventListener("click", () => setRange(btn.dataset.range, btn)));

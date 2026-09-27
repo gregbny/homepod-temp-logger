@@ -32,6 +32,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Iterator, Optional
 
 log = logging.getLogger("homepod")
+# uvicorn only configures its own loggers; without a handler our INFO lines
+# (weather status, refreshes) never reach `docker logs`.
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -49,19 +57,37 @@ RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "0"))
 # feature is fully disabled and the server makes NO outbound request — the app
 # stays 100% local, exactly as before. Set both to overlay Open-Meteo's hourly
 # outdoor temperature/humidity behind the indoor curves.
-def _opt_float(name: str) -> Optional[float]:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return None
+def _opt_float(name: str) -> tuple[Optional[float], str]:
+    """Parse an optional coordinate. Returns (value, raw); value is None when
+    unset or unparseable. Tolerates what people type into a Docker/Unraid form:
+    surrounding quotes and a decimal comma ("48,87")."""
+    raw = os.environ.get(name, "")
+    s = raw.strip().strip("'\"").strip().replace(",", ".")
+    if not s:
+        return None, raw
     try:
-        return float(raw)
+        return float(s), raw
     except ValueError:
-        return None
+        return None, raw
 
 
-WEATHER_LAT = _opt_float("WEATHER_LAT")
-WEATHER_LON = _opt_float("WEATHER_LON")
+(WEATHER_LAT, _RAW_LAT) = _opt_float("WEATHER_LAT")
+(WEATHER_LON, _RAW_LON) = _opt_float("WEATHER_LON")
 WEATHER_ENABLED = WEATHER_LAT is not None and WEATHER_LON is not None
+
+
+def _weather_status() -> str:
+    """One line for the startup log saying whether/why the overlay is on."""
+    if WEATHER_ENABLED:
+        return (f"weather: ENABLED for {WEATHER_LAT:.4f}, {WEATHER_LON:.4f} "
+                f"(Open-Meteo, refresh every {max(WEATHER_REFRESH_S, 300)}s)")
+    if not _RAW_LAT.strip() and not _RAW_LON.strip():
+        return "weather: disabled (WEATHER_LAT/WEATHER_LON not set) — fully local"
+    bad = [f"{n}={r!r}" for n, v, r in (("WEATHER_LAT", WEATHER_LAT, _RAW_LAT),
+                                         ("WEATHER_LON", WEATHER_LON, _RAW_LON))
+           if v is None]
+    return ("weather: DISABLED — invalid or missing " + ", ".join(bad)
+            + " (expected plain numbers, e.g. 48.87 and 2.39)")
 # How often to re-poll Open-Meteo (seconds). One call backfills ~92 past days.
 WEATHER_REFRESH_S = int(os.environ.get("WEATHER_REFRESH_S", "3600"))
 
@@ -128,6 +154,8 @@ def init_db() -> None:
 async def _startup() -> None:
     init_db()
     prune_old()
+    status = _weather_status()
+    (log.info if WEATHER_ENABLED or "not set" in status else log.warning)(status)
     if WEATHER_ENABLED:
         asyncio.create_task(_weather_loop())
 

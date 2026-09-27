@@ -499,7 +499,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v8";
+const CACHE = "homepod-logger-v9";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -1056,16 +1056,26 @@ function xBounds() {
 
 // Fixed local-time ticks: 24h → every 3h, 3d → every 12h, 7d → every midnight.
 // 30d/all keep Chart.js's data-driven ticks. Date arithmetic is DST-safe.
-function fixedTicks(min, max) {
-  const stepH = { "24h": 3, "3d": 12, "7d": 24 }[currentRange];
+// On a narrow plot the step doubles (24h: 3h → 6h) so labels never collide.
+function fixedTicks(min, max, width) {
+  let stepH = { "24h": 3, "3d": 12, "7d": 24 }[currentRange];
   if (!stepH || min == null || max == null) return null;
-  const d = new Date(min);
-  d.setMinutes(0, 0, 0);
-  d.setHours(d.getHours() - (d.getHours() % stepH));
-  const out = [];
-  while (d.getTime() <= max) {
-    if (d.getTime() >= min) out.push({ value: d.getTime() });
-    d.setHours(d.getHours() + stepH);
+  const build = (step) => {
+    const d = new Date(min);
+    d.setMinutes(0, 0, 0);
+    d.setHours(d.getHours() - (d.getHours() % step));
+    const out = [];
+    while (d.getTime() <= max) {
+      if (d.getTime() >= min) out.push({ value: d.getTime() });
+      d.setHours(d.getHours() + step);
+    }
+    return out;
+  };
+  let out = build(stepH);
+  const minGap = 46;                         // px per label ("00:00" + air)
+  while (width && out.length > 2 && out.length * minGap > width && stepH < 24) {
+    stepH *= 2;
+    out = build(stepH);
   }
   return out;
 }
@@ -1092,7 +1102,7 @@ function baseConfig(fmt, unit) {
         x: {
           type: "linear",
           afterBuildTicks(axis) {
-            const t = fixedTicks(axis.min, axis.max);
+            const t = fixedTicks(axis.min, axis.max, axis.width);
             if (t) axis.ticks = t;
           },
           // Colors are scriptable (re-read each render) so a light/dark theme
@@ -1118,7 +1128,10 @@ function baseConfig(fmt, unit) {
         // swatch already names it, and a title would collide with the labels.
         y2: {
           position: "right", display: "auto",
-          afterFit: (axis) => { axis.width += 42; },
+          // Only while shown: a hidden axis must not keep eating plot width.
+          afterFit: (axis) => {
+            if (axis.getMatchingVisibleMetas().length) axis.width += 42;
+          },
           grid: { drawOnChartArea: false, drawTicks: false },
           border: { display: false },
           ticks: { color: () => css("--muted"), font: { size: 11 }, crossAlign: "far",
@@ -1479,6 +1492,13 @@ function paintThumb(group) {
   th.style.transform = `translateX(${a ? a.offsetLeft : 0}px)`;
 }
 const paintThumbs = () => document.querySelectorAll(".seg, .tabbar").forEach(paintThumb);
+// Re-place the thumbs whenever a control changes size — e.g. the Pods/Average
+// control shrinks when the Outdoor switch appears after the first fetch.
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(() => paintThumbs());
+  window.addEventListener("DOMContentLoaded", () =>
+    document.querySelectorAll(".seg, .tabbar").forEach((g) => ro.observe(g)));
+}
 
 async function refresh() {
   const status = document.getElementById("status");

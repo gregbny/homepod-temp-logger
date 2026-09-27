@@ -24,4 +24,6 @@
   <Config Name="PORT" Target="PORT" Default="8088" Mode="" Description="Listen port inside the container (match the WebUI port)" Type="Variable" Display="advanced" Required="true" Mask="false">8088</Config>
   <Config Name="DB_PATH" Target="DB_PATH" Default="/data/homepod.db" Mode="" Description="SQLite file path inside the container" Type="Variable" Display="advanced" Required="true" Mask="false">/data/homepod.db</Config>
   <Config Name="RETENTION_DAYS" Target="RETENTION_DAYS" Default="0" Mode="" Description="0 = keep everything; N = prune readings older than N days at startup" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="WEATHER_LAT" Target="WEATHER_LAT" Default="" Mode="" Description="Optional outdoor weather (Open-Meteo, free, no API key): your latitude, e.g. 48.86. Leave empty (with WEATHER_LON) to keep the app fully local." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="WEATHER_LON" Target="WEATHER_LON" Default="" Mode="" Description="Optional outdoor weather: your longitude, e.g. 2.35. Both must be set to enable the overlay." Type="Variable" Display="always" Required="false" Mask="false"></Config>
 </Container>

@@ -13,3 +13,8 @@ services:
       PORT: "8088"
       DB_PATH: "/data/homepod.db"
       RETENTION_DAYS: "0"    # 0 = unlimited history; e.g. 365 to prune beyond a year
+      # Optional outdoor weather (Open-Meteo, free, no API key) drawn behind the
+      # indoor curves on its own right-hand axis. Set both to your coordinates;
+      # leave empty to keep the app 100% local (no outbound request at all).
+      WEATHER_LAT: ""        # e.g. "48.86"
+      WEATHER_LON: ""        # e.g. "2.35"

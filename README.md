@@ -28,8 +28,9 @@ to the internet.
 - 📊 **Today vs yesterday** — both days overlaid on a time-of-day axis for a quick
   differential read, plus a **daily-average history** (one color-binned figure per
   day) laid out as a monthly calendar you swipe through month by month.
-- ☁️ **Optional outdoor weather** (Open-Meteo) as a recessive backdrop behind the
-  indoor curves — off by default, the app stays 100% local unless you opt in.
+- ☁️ **Optional outdoor weather** (Open-Meteo, free, no API key) as a recessive
+  backdrop behind the indoor curves, on its own axis so indoor detail is kept —
+  off by default, the app stays 100% local unless you opt in.
 - 🌗 **Light & dark**, responsive for phone and desktop, accessible (colorblind-safe
   palette).
 - 📲 **Installable PWA** — add to your iPhone/Mac home screen; works offline from

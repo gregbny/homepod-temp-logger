@@ -376,10 +376,14 @@ async def series(range: str = "24h") -> dict:
 
     weather: list[dict] = []
     if WEATHER_ENABLED:
+        # Open-Meteo also returns today's forecast hours; keep observed ones only
+        # so the backdrop never runs ahead of the indoor curves.
+        wwhere = (f"{where} AND" if where else "WHERE") + " ts <= ?"
+        wparams = params + (datetime.now(timezone.utc).isoformat(),)
         with db() as conn:
             wrows = conn.execute(
-                f"SELECT temp, humidity, ts FROM weather {where} ORDER BY ts",
-                params,
+                f"SELECT temp, humidity, ts FROM weather {wwhere} ORDER BY ts",
+                wparams,
             ).fetchall()
         for row in wrows:
             s = row["ts"]
@@ -467,7 +471,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v6";
+const CACHE = "homepod-logger-v8";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -970,6 +974,49 @@ const crosshair = {
   }
 };
 
+// Tooltip mode: for every visible series, its point nearest in time to the
+// pointer. Chart.js "index" pairs points by array position, which misaligns
+// series that don't share timestamps (weather hours vs. indoor readings, pods
+// reporting at different minutes).
+Chart.Interaction.modes.nearestEach = (chart, e) => {
+  const pos = Chart.helpers.getRelativePosition(e, chart);
+  const hits = [];
+  chart.data.datasets.forEach((ds, i) => {
+    if (!chart.isDatasetVisible(i)) return;
+    let best = null, bd = Infinity;
+    chart.getDatasetMeta(i).data.forEach((el, index) => {
+      const d = Math.abs(el.x - pos.x);
+      if (d < bd) { bd = d; best = { element: el, datasetIndex: i, index }; }
+    });
+    if (best && bd < 30) hits.push(best);  // px: skip series with a gap here
+  });
+  return hits;
+};
+
+// Touch tooltips must close when the finger lifts, but two things re-open them:
+//  1. After a tap, iOS (and Chromium) fire emulated mouse events — mousemove,
+//     mousedown, click — a few ms after touchend; Chart.js reads them as hover.
+//  2. Chart.js defers event handling to the next animation frame, so on a
+//     quick tap the touchstart is processed *after* our touchend dismissal.
+// Either way nothing closes it again (a phone never sends mouseout), so it
+// sticks. Rule: around a touch, Chart.js only sees genuine touch events, and
+// only while a finger is actually down. A real mouse is unaffected. (Test the
+// native type — Chart.js renames touchmove to "mousemove" internally.)
+let lastTouch = 0, fingerDown = false;
+["touchstart", "touchmove", "touchend", "touchcancel"].forEach((t) =>
+  window.addEventListener(t, (e) => {
+    lastTouch = Date.now();
+    fingerDown = e.touches.length > 0;
+  }, { capture: true, passive: true }));
+Chart.register({
+  id: "touchGuard",
+  beforeEvent(chart, args) {
+    const native = args.event.native;
+    if (!native || Date.now() - lastTouch > 1000) return;
+    if (!(fingerDown && native.type.startsWith("touch"))) return false;
+  }
+});
+
 // Fixed, hour-aligned x windows on the short ranges so the axis reads the same
 // whenever you open the app, instead of drifting with the newest reading.
 function xBounds() {
@@ -1012,7 +1059,7 @@ function baseConfig(fmt, unit) {
     options: {
       responsive: true, maintainAspectRatio: false,
       layout: { padding: { right: 44 } },     // room for the end label
-      interaction: { mode: "index", intersect: false },
+      interaction: { mode: "nearestEach", intersect: false },
       scales: {
         x: {
           type: "linear",
@@ -1032,6 +1079,21 @@ function baseConfig(fmt, unit) {
           grid: { color: () => css("--grid"), drawTicks: false },
           border: { display: false },
           ticks: { color: () => css("--muted"), font: { size: 11 },
+                   maxTicksLimit: 7, callback: tickFmt(unit) }
+        },
+        // Outdoor weather gets its own right-hand scale so the indoor axis
+        // keeps its resolution (a shared 10–25° axis flattens a 1° indoor
+        // swing). "auto" shows it only while the weather series is visible.
+        // The axis is widened and its labels pushed to the far edge, leaving
+        // room for the indoor end label (ticks.padding would also pad the top
+        // and bottom of the plot). No axis title: the legend's gray "Outdoor"
+        // swatch already names it, and a title would collide with the labels.
+        y2: {
+          position: "right", display: "auto",
+          afterFit: (axis) => { axis.width += 42; },
+          grid: { drawOnChartArea: false, drawTicks: false },
+          border: { display: false },
+          ticks: { color: () => css("--muted"), font: { size: 11 }, crossAlign: "far",
                    maxTicksLimit: 7, callback: tickFmt(unit) }
         }
       },
@@ -1095,7 +1157,7 @@ function weatherDataset(weather, field) {
   return {
     label: "Outdoor",
     data: weather.map((p) => ({ x: p.x, y: p[field] })).filter((p) => p.y != null),
-    _weather: true,
+    _weather: true, yAxisID: "y2",
     borderColor: css("--baseline"),
     backgroundColor: rgba(css("--muted"), 0.12),
     fill: "start",                 // area from the value down to the axis
@@ -1105,7 +1167,30 @@ function weatherDataset(weather, field) {
   };
 }
 
-function renderLegend(elId, data, homepods, field, fmt) {
+// Outdoor legend line: its range plus how far indoors sits from it, averaged
+// over the hours both have — the absolute gap the separate axes no longer show.
+function weatherLegend(data, homepods, weather, field, fmt) {
+  const out = new Map(weather.filter((p) => p[field] != null)
+    .map((p) => [Math.round(p.x / HOUR) * HOUR, p[field]]));
+  if (!out.size) return "";
+  const vals = [...out.values()];
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  const av = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const diffs = averageSeries(data, homepods, field)
+    .filter((p) => out.has(p.x)).map((p) => p.y - out.get(p.x));
+  let gap = "";
+  if (diffs.length) {
+    const d = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+    gap = ` · inside ${d >= 0 ? "+" : "−"}${fmt(Math.abs(d))}`;
+  }
+  return `<span class="item">
+    <span class="wx-swatch"></span>
+    <span class="lbl">Outdoor</span>
+    <span class="stat">${fmt(mn)} – ${fmt(mx)} · avg ${fmt(av)}${gap}</span>
+  </span>`;
+}
+
+function renderLegend(elId, data, homepods, field, fmt, weather) {
   const items = displayMode === "avg"
     ? [{ name: "Average", color: css("--s1"),
          vals: averageSeries(data, homepods, field).map((p) => p.y) }]
@@ -1120,7 +1205,28 @@ function renderLegend(elId, data, homepods, field, fmt) {
         <span class="lbl">${name}</span>
         <span class="stat">${fmt(mn)} – ${fmt(mx)} · avg ${fmt(av)}</span>
       </span>`;
-    }).join("");
+    }).join("") + (showWeather && weather && weather.length
+      ? weatherLegend(data, homepods, weather, field, fmt) : "");
+}
+
+// Apply the outdoor on/off state in place (no refetch): series visibility, the
+// right axis (follows via display:"auto"), end-label room and the legends.
+let lastSer = null;
+function paintWeather() {
+  [tempChart, humChart].forEach((ch) => {
+    const wxShown = ch.data.datasets.some((ds) => {
+      if (ds._weather) ds.hidden = !showWeather;
+      return ds._weather && showWeather;
+    });
+    // With the right axis up, its widened box hosts the end label instead.
+    ch.options.layout.padding.right = wxShown ? 4 : 44;
+    ch.update();
+  });
+  if (!lastSer) return;
+  const { data, homepods, weather } = lastSer;
+  const wx = lastSer.weather_enabled ? weather || [] : [];
+  renderLegend("legendTemp", data, homepods, "temp", fmtT, wx);
+  renderLegend("legendHum", data, homepods, "humidity", fmtH, wx);
 }
 
 // --- "Today vs yesterday" — both days on a shared time-of-day axis ---------- //
@@ -1386,9 +1492,8 @@ async function refresh() {
       .concat(wxOn ? [weatherDataset(wx, "temp")] : []);
     humChart.data.datasets = datasets(ser.data, homepods, "humidity", fmtH)
       .concat(wxOn ? [weatherDataset(wx, "humidity")] : []);
-    tempChart.update(); humChart.update();
-    renderLegend("legendTemp", ser.data, homepods, "temp", fmtT);
-    renderLegend("legendHum", ser.data, homepods, "humidity", fmtH);
+    lastSer = ser;
+    paintWeather();
     renderCompare(ser3);
     renderDaily(dailyCache.ser.data, dailyCache.ser.homepods);
 
@@ -1426,16 +1531,22 @@ window.addEventListener("DOMContentLoaded", () => {
   cmpChart = new Chart(document.getElementById("cmpChart"), cmpConfig());
 
   // Touch: show the tooltip only while a finger is down, then dismiss it —
-  // otherwise the panel sticks around after a tap and eats the screen.
+  // otherwise the panel sticks around after a tap and eats the screen. The
+  // touchGuard plugin keeps iOS's trailing emulated mouse events from
+  // re-opening it; tapping anywhere else also closes it, as in iOS.
+  const charts = [tempChart, humChart, cmpChart];
   const dismiss = (ch) => {
+    if (!ch.tooltip || !ch.tooltip.getActiveElements().length) return;
     ch.setActiveElements([]);
-    if (ch.tooltip) ch.tooltip.setActiveElements([], { x: 0, y: 0 });
-    ch.update();
+    ch.tooltip.setActiveElements([], { x: 0, y: 0 });
+    ch.update("none");
   };
-  [tempChart, humChart, cmpChart].forEach((ch) => {
+  charts.forEach((ch) => {
     ch.canvas.addEventListener("touchend", () => dismiss(ch), { passive: true });
     ch.canvas.addEventListener("touchcancel", () => dismiss(ch), { passive: true });
   });
+  document.addEventListener("touchstart", (e) =>
+    charts.forEach((ch) => { if (e.target !== ch.canvas) dismiss(ch); }), { passive: true });
 
   document.querySelectorAll("#ranges button").forEach((btn) =>
     btn.addEventListener("click", () => setRange(btn.dataset.range, btn)));
@@ -1498,10 +1609,7 @@ window.addEventListener("DOMContentLoaded", () => {
   wxBox.addEventListener("change", (e) => {
     showWeather = e.target.checked;
     localStorage.setItem("showWeather", showWeather ? "1" : "0");
-    [tempChart, humChart].forEach((ch) => {
-      ch.data.datasets.forEach((ds) => { if (ds._weather) ds.hidden = !showWeather; });
-      ch.update();
-    });
+    paintWeather();
   });
 
   // iOS install tip (Safari, when not already standalone).

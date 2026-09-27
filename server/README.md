@@ -74,7 +74,10 @@ Latest known reading per HomePod (feeds the dashboard's live tiles).
 - **Optional outdoor-weather backdrop** (Open-Meteo, hourly) behind the indoor
   curves, on its own right-hand axis so the indoor axis keeps its resolution; the
   legend gives the outdoor range and the average indoor–outdoor gap. On/off
-  toggle — only when `WEATHER_LAT`/`WEATHER_LON` are set on the server.
+  toggle. Turn it on from the dashboard's **Outdoor weather** card: enter (or
+  paste from Google Maps) your coordinates once; they're saved in the SQLite
+  database under `/data` (rounded to ~1 km), so they survive image updates and
+  reinstalls and never need to appear in a compose file or repo.
 
 ### `GET /manifest.webmanifest` · `GET /sw.js`
 PWA manifest and service worker (caches the shell + data). Served at root so the
@@ -90,7 +93,7 @@ service-worker scope covers the whole app.
 | `PORT` | `8088` | listen port |
 | `DB_PATH` | `/data/homepod.db` | SQLite file (inside the volume) |
 | `RETENTION_DAYS` | `0` | `0` = unlimited history; `>0` prunes readings older than N days at startup |
-| `WEATHER_LAT` / `WEATHER_LON` | *(unset)* | **opt-in** outdoor-weather overlay: set both to your coordinates to draw [Open-Meteo](https://open-meteo.com)'s hourly outdoor temperature/humidity as a gray backdrop behind the indoor curves (free, no API key). When unset the server makes **no outbound request** — the app stays 100% local |
+| `WEATHER_LAT` / `WEATHER_LON` | *(unset)* | optional alternative to the dashboard setting for the outdoor-weather overlay ([Open-Meteo](https://open-meteo.com), hourly, free, no API key). When both are set they override the dashboard (which then shows them read-only). With docker compose, put them in a git-ignored `.env` next to the compose file. With no location at all the server makes **no outbound request** — the app stays 100% local |
 | `WEATHER_REFRESH_S` | `3600` | how often to re-poll Open-Meteo (min 300s). Each poll backfills ~92 past days, so history survives restarts |
 
 ## Run locally (quick test)

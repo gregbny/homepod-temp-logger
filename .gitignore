@@ -4,6 +4,9 @@ __pycache__/
 .venv/
 venv/
 
+# Local settings (e.g. WEATHER_LAT/WEATHER_LON for docker compose)
+.env
+
 # Local data / SQLite
 data/
 *.db

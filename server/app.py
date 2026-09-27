@@ -53,10 +53,13 @@ DB_PATH = os.environ.get("DB_PATH", "/data/homepod.db")
 # 0 = no pruning (unlimited history, the default).
 RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "0"))
 
-# Outdoor weather background (opt-in). When WEATHER_LAT/WEATHER_LON are unset the
-# feature is fully disabled and the server makes NO outbound request — the app
-# stays 100% local, exactly as before. Set both to overlay Open-Meteo's hourly
-# outdoor temperature/humidity behind the indoor curves.
+# Outdoor weather background (opt-in). With no location configured the feature
+# is fully disabled and the server makes NO outbound request — the app stays
+# 100% local. The location comes from, in order:
+#   1. WEATHER_LAT / WEATHER_LON environment variables (if both valid), else
+#   2. the location saved from the dashboard (stored in the SQLite `settings`
+#      table under /data, so it survives image updates and reinstalls and
+#      never has to live in a compose file or a public repo).
 def _opt_float(name: str) -> tuple[Optional[float], str]:
     """Parse an optional coordinate. Returns (value, raw); value is None when
     unset or unparseable. Tolerates what people type into a Docker/Unraid form:
@@ -71,23 +74,9 @@ def _opt_float(name: str) -> tuple[Optional[float], str]:
         return None, raw
 
 
-(WEATHER_LAT, _RAW_LAT) = _opt_float("WEATHER_LAT")
-(WEATHER_LON, _RAW_LON) = _opt_float("WEATHER_LON")
-WEATHER_ENABLED = WEATHER_LAT is not None and WEATHER_LON is not None
-
-
-def _weather_status() -> str:
-    """One line for the startup log saying whether/why the overlay is on."""
-    if WEATHER_ENABLED:
-        return (f"weather: ENABLED for {WEATHER_LAT:.4f}, {WEATHER_LON:.4f} "
-                f"(Open-Meteo, refresh every {max(WEATHER_REFRESH_S, 300)}s)")
-    if not _RAW_LAT.strip() and not _RAW_LON.strip():
-        return "weather: disabled (WEATHER_LAT/WEATHER_LON not set) — fully local"
-    bad = [f"{n}={r!r}" for n, v, r in (("WEATHER_LAT", WEATHER_LAT, _RAW_LAT),
-                                         ("WEATHER_LON", WEATHER_LON, _RAW_LON))
-           if v is None]
-    return ("weather: DISABLED — invalid or missing " + ", ".join(bad)
-            + " (expected plain numbers, e.g. 48.87 and 2.39)")
+(_ENV_LAT, _RAW_LAT) = _opt_float("WEATHER_LAT")
+(_ENV_LON, _RAW_LON) = _opt_float("WEATHER_LON")
+ENV_LOCATION = _ENV_LAT is not None and _ENV_LON is not None
 # How often to re-poll Open-Meteo (seconds). One call backfills ~92 past days.
 WEATHER_REFRESH_S = int(os.environ.get("WEATHER_REFRESH_S", "3600"))
 
@@ -148,16 +137,35 @@ def init_db() -> None:
             )
             """
         )
+        # Small key/value store for settings edited from the dashboard (the
+        # weather location). Additive: existing tables are never touched.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key       TEXT    PRIMARY KEY,
+                value     TEXT    NOT NULL
+            )
+            """
+        )
+
+
+def get_setting(key: str) -> Optional[str]:
+    with db() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
 
 
 @app.on_event("startup")
 async def _startup() -> None:
     init_db()
     prune_old()
-    status = _weather_status()
-    (log.info if WEATHER_ENABLED or "not set" in status else log.warning)(status)
-    if WEATHER_ENABLED:
-        asyncio.create_task(_weather_loop())
+    if (_RAW_LAT.strip() or _RAW_LON.strip()) and not ENV_LOCATION:
+        log.warning("weather: ignoring invalid WEATHER_LAT=%r / WEATHER_LON=%r "
+                    "(expected plain numbers, e.g. 48.87 and 2.39)", _RAW_LAT, _RAW_LON)
+    log.info(_weather_status())
+    # Always running: it idles while no location is set and wakes up as soon
+    # as one is saved from the dashboard.
+    asyncio.create_task(_weather_loop())
 
 
 def prune_old() -> None:
@@ -178,6 +186,35 @@ OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 _WEATHER_PAST_DAYS = 92  # Open-Meteo's max look-back on the forecast endpoint.
 
 
+def weather_location() -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """Current (lat, lon, source) — source is "env", "settings" or None."""
+    if ENV_LOCATION:
+        return _ENV_LAT, _ENV_LON, "env"
+    lat, lon = get_setting("weather_lat"), get_setting("weather_lon")
+    if lat is not None and lon is not None:
+        return float(lat), float(lon), "settings"
+    return None, None, None
+
+
+def weather_enabled() -> bool:
+    return weather_location()[2] is not None
+
+
+def _weather_status() -> str:
+    """One line for the log saying whether/where the overlay is on."""
+    lat, lon, source = weather_location()
+    if source is None:
+        return ("weather: disabled (no location — set it in the dashboard or via "
+                "WEATHER_LAT/WEATHER_LON) — fully local")
+    origin = "WEATHER_LAT/WEATHER_LON" if source == "env" else "dashboard setting"
+    return (f"weather: ENABLED for {lat:.2f}, {lon:.2f} from {origin} "
+            f"(Open-Meteo, refresh every {max(WEATHER_REFRESH_S, 300)}s)")
+
+
+# Set when the location changes so the loop refreshes right away.
+_weather_wake: Optional[asyncio.Event] = None
+
+
 def fetch_weather() -> int:
     """Poll Open-Meteo and upsert hourly outdoor readings. Returns rows stored.
 
@@ -185,11 +222,12 @@ def fetch_weather() -> int:
     slow network never stalls request handling. Any failure is swallowed and
     logged: the weather overlay is best-effort and must never break the app.
     """
-    if not WEATHER_ENABLED:
+    lat, lon, source = weather_location()
+    if source is None:
         return 0
     query = urllib.parse.urlencode({
-        "latitude": WEATHER_LAT,
-        "longitude": WEATHER_LON,
+        "latitude": lat,
+        "longitude": lon,
         "hourly": "temperature_2m,relative_humidity_2m",
         "past_days": _WEATHER_PAST_DAYS,
         "forecast_days": 1,
@@ -217,7 +255,23 @@ def fetch_weather() -> int:
 
     if not rows:
         return 0
+    # The location may have changed while we were downloading: don't mix the
+    # old place's weather into the (just cleared) cache.
+    if weather_location()[:2] != (lat, lon):
+        return 0
     with db() as conn:
+        # The cache remembers which place it holds. If the location changed by
+        # any route (dashboard or env vars), start the cache over. A cache from
+        # before this marker existed is adopted as-is, so upgrading never
+        # deletes anything.
+        here = f"{lat},{lon}"
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'weather_cache_loc'").fetchone()
+        if row is not None and row["value"] != here:
+            conn.execute("DELETE FROM weather")
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('weather_cache_loc', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (here,))
         conn.executemany(
             """
             INSERT INTO weather (ts, temp, humidity) VALUES (?, ?, ?)
@@ -231,14 +285,22 @@ def fetch_weather() -> int:
 
 
 async def _weather_loop() -> None:
-    """Refresh the weather cache on startup, then every WEATHER_REFRESH_S."""
+    """Refresh the weather cache on startup, then every WEATHER_REFRESH_S, or
+    immediately when the location is changed from the dashboard."""
+    global _weather_wake
+    _weather_wake = asyncio.Event()
     while True:
+        if weather_enabled():
+            try:
+                n = await asyncio.to_thread(fetch_weather)
+                log.info("weather: refreshed %d hourly points", n)
+            except Exception as exc:  # network, JSON, DB — never crash the app.
+                log.warning("weather: refresh failed: %s", exc)
         try:
-            n = await asyncio.to_thread(fetch_weather)
-            log.info("weather: refreshed %d hourly points", n)
-        except Exception as exc:  # network, JSON, DB — never crash the app.
-            log.warning("weather: refresh failed: %s", exc)
-        await asyncio.sleep(max(WEATHER_REFRESH_S, 300))
+            await asyncio.wait_for(_weather_wake.wait(), max(WEATHER_REFRESH_S, 300))
+        except asyncio.TimeoutError:
+            pass
+        _weather_wake.clear()
 
 
 # --------------------------------------------------------------------------- #
@@ -403,7 +465,8 @@ async def series(range: str = "24h") -> dict:
         )
 
     weather: list[dict] = []
-    if WEATHER_ENABLED:
+    wx_enabled = weather_enabled()
+    if wx_enabled:
         # Open-Meteo also returns today's forecast hours; keep observed ones only
         # so the backdrop never runs ahead of the indoor curves.
         wwhere = (f"{where} AND" if where else "WHERE") + " ts <= ?"
@@ -426,7 +489,7 @@ async def series(range: str = "24h") -> dict:
         "range": range,
         "homepods": sorted(data.keys()),
         "data": data,
-        "weather_enabled": WEATHER_ENABLED,
+        "weather_enabled": wx_enabled,
         "weather": weather,
     }
 
@@ -462,9 +525,67 @@ async def health() -> dict:
         "status": "ok",
         "readings": n,
         "retention_days": RETENTION_DAYS,
-        "weather_enabled": WEATHER_ENABLED,
+        "weather_enabled": weather_enabled(),
         "weather_points": w,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Settings (weather location), editable from the dashboard
+# --------------------------------------------------------------------------- #
+class LocationIn(BaseModel):
+    # Both null clears the location (back to 100% local).
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+def _location_payload() -> dict:
+    lat, lon, source = weather_location()
+    with db() as conn:
+        w = conn.execute("SELECT COUNT(*) AS n FROM weather").fetchone()["n"]
+    return {"lat": lat, "lon": lon, "source": source,
+            # Env vars win over the dashboard, so it can't edit them.
+            "editable": not ENV_LOCATION, "weather_points": w}
+
+
+@app.get("/api/settings")
+async def get_settings() -> dict:
+    return _location_payload()
+
+
+@app.put("/api/settings")
+async def put_settings(body: LocationIn) -> dict:
+    if ENV_LOCATION:
+        raise HTTPException(status_code=409, detail=(
+            "location is set by WEATHER_LAT/WEATHER_LON on the server; "
+            "change or remove those to edit it here"))
+    if (body.lat is None) != (body.lon is None):
+        raise HTTPException(status_code=400, detail="give both lat and lon, or neither")
+    if body.lat is not None and not (-90 <= body.lat <= 90 and -180 <= body.lon <= 180):
+        raise HTTPException(status_code=400, detail="lat must be in [-90, 90], lon in [-180, 180]")
+
+    old = weather_location()[:2]
+    # Two decimals ≈ 1 km: plenty for a weather-model grid (1–11 km) and it
+    # doesn't pinpoint a building.
+    new = (None, None) if body.lat is None else (round(body.lat, 2), round(body.lon, 2))
+    with db() as conn:
+        if new[0] is None:
+            conn.execute("DELETE FROM settings WHERE key IN ('weather_lat', 'weather_lon')")
+        else:
+            conn.executemany(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [("weather_lat", repr(new[0])), ("weather_lon", repr(new[1]))],
+            )
+        # Cached outdoor rows belong to the old place: drop them (only the
+        # weather table — indoor readings are never touched) and refetch.
+        if new != old:
+            conn.execute("DELETE FROM weather")
+    if new != old:
+        log.info(_weather_status())
+        if _weather_wake is not None:
+            _weather_wake.set()
+    return _location_payload()
 
 
 # --------------------------------------------------------------------------- #
@@ -499,7 +620,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v9";
+const CACHE = "homepod-logger-v10";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -813,6 +934,34 @@ INDEX_HTML = r"""<!doctype html>
   }
   .mdots span.on { width:18px; opacity:.75; }
 
+  /* Outdoor-weather location: an iOS inset-grouped form ------------------- */
+  .loc { margin-top:12px; border-radius:12px; background:var(--fill-2); overflow:hidden; }
+  .loc label {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    min-height:44px; padding:0 14px; font-size:15px;
+  }
+  .loc label + label { border-top:.5px solid var(--border); }
+  .loc input {
+    flex:1; min-width:0; border:0; background:transparent; outline:none; text-align:right;
+    font:inherit; font-size:16px;              /* ≥16px: iOS won't zoom on focus */
+    color:var(--text-1); font-variant-numeric:tabular-nums;
+  }
+  .loc input::placeholder { color:var(--muted); opacity:.6; }
+  .loc input:disabled { color:var(--muted); -webkit-text-fill-color:var(--muted); }
+  .loc-actions { display:flex; gap:10px; margin-top:12px; }
+  .btn {
+    flex:1; height:44px; border:0; border-radius:12px; cursor:pointer;
+    font-size:15px; font-weight:600; background:var(--fill); color:var(--tint);
+    transition:transform .2s var(--spring), opacity .2s;
+  }
+  .btn:active { transform:scale(.97); }
+  .btn.primary { background:var(--tint); color:#fff; }
+  .btn:disabled { opacity:.4; cursor:default; }
+  .wx-state { font-size:13px; color:var(--muted); margin-top:2px; }
+  .wx-state.on { color:var(--good); }
+  .wx-state.err { color:var(--serious); }
+  .hint { font-size:12px; color:var(--muted); margin:10px 2px 0; }
+
   .status-line { font-size:12px; color:var(--muted); text-align:center; margin-top:4px; }
   .ios-hint {
     display:none; font-size:15px; color:var(--text-2); background:var(--surface);
@@ -879,6 +1028,22 @@ INDEX_HTML = r"""<!doctype html>
   </div>
   <div class="months" id="months"></div>
   <div class="mdots" id="mdots"></div>
+</div>
+
+<div class="card" id="wxCard" style="display:none">
+  <h2>Outdoor weather</h2>
+  <div class="wx-state" id="wxState"></div>
+  <form id="wxForm" autocomplete="off">
+    <div class="loc">
+      <label>Latitude <input id="wxLat" inputmode="decimal" placeholder="48.86" spellcheck="false"></label>
+      <label>Longitude <input id="wxLon" inputmode="decimal" placeholder="2.35" spellcheck="false"></label>
+    </div>
+    <div class="loc-actions" id="wxActions">
+      <button type="button" class="btn" id="wxClear">Remove</button>
+      <button type="submit" class="btn primary" id="wxSave">Save</button>
+    </div>
+  </form>
+  <p class="hint" id="wxHint">Tip: in Google Maps, long-press your building, copy the coordinates and paste them into Latitude — both fields fill in. Saved on your server, rounded to ~1 km; only these two numbers are sent to Open-Meteo (free, no account).</p>
 </div>
 
 <p class="status-line" id="status">Loading…</p>
@@ -1500,6 +1665,64 @@ if (window.ResizeObserver) {
     document.querySelectorAll(".seg, .tabbar").forEach((g) => ro.observe(g)));
 }
 
+// --- Outdoor-weather location (saved server-side, in /data) ------------------ //
+// Pulls the first two numbers out of what was typed or pasted: "48.8701,
+// 2.3931" (Google Maps), "48,87 2,39" (decimal commas) or a single value.
+function parseCoords(text) {
+  return (String(text).match(/-?\d+(?:[.,]\d+)?/g) || [])
+    .map((n) => parseFloat(n.replace(",", ".")));
+}
+
+let wxSettings = null;
+function paintSettings(st) {
+  wxSettings = st;
+  document.getElementById("wxCard").style.display = "";
+  const lat = document.getElementById("wxLat"), lon = document.getElementById("wxLon");
+  const state = document.getElementById("wxState");
+  const typing = document.activeElement === lat || document.activeElement === lon;
+  if (!typing) {
+    lat.value = st.lat ?? "";
+    lon.value = st.lon ?? "";
+  }
+  lat.disabled = lon.disabled = !st.editable;
+  document.getElementById("wxActions").style.display = st.editable ? "" : "none";
+  document.getElementById("wxHint").style.display = st.editable ? "" : "none";
+  document.getElementById("wxClear").style.display = st.source ? "" : "none";
+  state.className = "wx-state" + (st.source ? " on" : "");
+  if (!st.source) state.textContent = "Off — nothing leaves your network.";
+  else if (!st.editable) state.textContent = "On · set by WEATHER_LAT / WEATHER_LON on the server";
+  else state.textContent = st.weather_points
+    ? `On · ${st.weather_points.toLocaleString()} hourly points`
+    : "On · fetching the last 92 days…";
+}
+
+async function loadSettings() {
+  try { paintSettings(await (await fetch("/api/settings")).json()); } catch (e) {}
+}
+
+async function saveSettings(lat, lon) {
+  const state = document.getElementById("wxState");
+  const save = document.getElementById("wxSave");
+  save.disabled = true;
+  try {
+    const res = await fetch("/api/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat, lon })
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : "invalid values");
+    document.activeElement && document.activeElement.blur();
+    paintSettings(body);
+    // The server refetches in the background; pick the data up as it lands.
+    [0, 3000, 8000, 15000].forEach((ms) => setTimeout(() => { refresh(); }, ms));
+  } catch (e) {
+    state.className = "wx-state err";
+    state.textContent = "Not saved: " + e.message;
+  } finally {
+    save.disabled = false;
+  }
+}
+
 async function refresh() {
   const status = document.getElementById("status");
   try {
@@ -1524,6 +1747,7 @@ async function refresh() {
 
     assignColors([...new Set([...latest.map((r) => r.homepod), ...homepods])].sort());
     renderTiles(latest);
+    loadSettings();
 
     // Outdoor overlay: only when the server has it configured and has data.
     const wx = ser.weather || [];
@@ -1658,6 +1882,33 @@ window.addEventListener("DOMContentLoaded", () => {
     showWeather = e.target.checked;
     localStorage.setItem("showWeather", showWeather ? "1" : "0");
     paintWeather();
+  });
+
+  // Outdoor-weather location form.
+  const latIn = document.getElementById("wxLat"), lonIn = document.getElementById("wxLon");
+  latIn.addEventListener("paste", (e) => {
+    const nums = parseCoords((e.clipboardData || window.clipboardData).getData("text"));
+    if (nums.length >= 2) {           // "48.8701, 2.3931" → both fields
+      e.preventDefault();
+      latIn.value = nums[0];
+      lonIn.value = nums[1];
+    }
+  });
+  document.getElementById("wxForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const [lat] = parseCoords(latIn.value), [lon] = parseCoords(lonIn.value);
+    const state = document.getElementById("wxState");
+    if (!(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) {
+      state.className = "wx-state err";
+      state.textContent = "Enter a latitude (−90…90) and a longitude (−180…180).";
+      return;
+    }
+    saveSettings(lat, lon);
+  });
+  document.getElementById("wxClear").addEventListener("click", () => {
+    if (confirm("Remove the location? Outdoor weather stops and its cached data is " +
+                "deleted. Your indoor readings are kept."))
+      saveSettings(null, null);
   });
 
   // iOS install tip (Safari, when not already standalone).

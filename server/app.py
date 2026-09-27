@@ -32,6 +32,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Iterator, Optional
 
 log = logging.getLogger("homepod")
+# uvicorn only configures its own loggers; without a handler our INFO lines
+# (weather status, refreshes) never reach `docker logs`.
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -49,19 +57,37 @@ RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "0"))
 # feature is fully disabled and the server makes NO outbound request — the app
 # stays 100% local, exactly as before. Set both to overlay Open-Meteo's hourly
 # outdoor temperature/humidity behind the indoor curves.
-def _opt_float(name: str) -> Optional[float]:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return None
+def _opt_float(name: str) -> tuple[Optional[float], str]:
+    """Parse an optional coordinate. Returns (value, raw); value is None when
+    unset or unparseable. Tolerates what people type into a Docker/Unraid form:
+    surrounding quotes and a decimal comma ("48,87")."""
+    raw = os.environ.get(name, "")
+    s = raw.strip().strip("'\"").strip().replace(",", ".")
+    if not s:
+        return None, raw
     try:
-        return float(raw)
+        return float(s), raw
     except ValueError:
-        return None
+        return None, raw
 
 
-WEATHER_LAT = _opt_float("WEATHER_LAT")
-WEATHER_LON = _opt_float("WEATHER_LON")
+(WEATHER_LAT, _RAW_LAT) = _opt_float("WEATHER_LAT")
+(WEATHER_LON, _RAW_LON) = _opt_float("WEATHER_LON")
 WEATHER_ENABLED = WEATHER_LAT is not None and WEATHER_LON is not None
+
+
+def _weather_status() -> str:
+    """One line for the startup log saying whether/why the overlay is on."""
+    if WEATHER_ENABLED:
+        return (f"weather: ENABLED for {WEATHER_LAT:.4f}, {WEATHER_LON:.4f} "
+                f"(Open-Meteo, refresh every {max(WEATHER_REFRESH_S, 300)}s)")
+    if not _RAW_LAT.strip() and not _RAW_LON.strip():
+        return "weather: disabled (WEATHER_LAT/WEATHER_LON not set) — fully local"
+    bad = [f"{n}={r!r}" for n, v, r in (("WEATHER_LAT", WEATHER_LAT, _RAW_LAT),
+                                         ("WEATHER_LON", WEATHER_LON, _RAW_LON))
+           if v is None]
+    return ("weather: DISABLED — invalid or missing " + ", ".join(bad)
+            + " (expected plain numbers, e.g. 48.87 and 2.39)")
 # How often to re-poll Open-Meteo (seconds). One call backfills ~92 past days.
 WEATHER_REFRESH_S = int(os.environ.get("WEATHER_REFRESH_S", "3600"))
 
@@ -128,6 +154,8 @@ def init_db() -> None:
 async def _startup() -> None:
     init_db()
     prune_old()
+    status = _weather_status()
+    (log.info if WEATHER_ENABLED or "not set" in status else log.warning)(status)
     if WEATHER_ENABLED:
         asyncio.create_task(_weather_loop())
 
@@ -471,7 +499,7 @@ MANIFEST_JSON = """{
 
 
 SERVICE_WORKER_JS = r"""
-const CACHE = "homepod-logger-v8";
+const CACHE = "homepod-logger-v9";
 const SHELL = [
   "/",
   "/static/chart.umd.min.js",
@@ -1028,16 +1056,26 @@ function xBounds() {
 
 // Fixed local-time ticks: 24h → every 3h, 3d → every 12h, 7d → every midnight.
 // 30d/all keep Chart.js's data-driven ticks. Date arithmetic is DST-safe.
-function fixedTicks(min, max) {
-  const stepH = { "24h": 3, "3d": 12, "7d": 24 }[currentRange];
+// On a narrow plot the step doubles (24h: 3h → 6h) so labels never collide.
+function fixedTicks(min, max, width) {
+  let stepH = { "24h": 3, "3d": 12, "7d": 24 }[currentRange];
   if (!stepH || min == null || max == null) return null;
-  const d = new Date(min);
-  d.setMinutes(0, 0, 0);
-  d.setHours(d.getHours() - (d.getHours() % stepH));
-  const out = [];
-  while (d.getTime() <= max) {
-    if (d.getTime() >= min) out.push({ value: d.getTime() });
-    d.setHours(d.getHours() + stepH);
+  const build = (step) => {
+    const d = new Date(min);
+    d.setMinutes(0, 0, 0);
+    d.setHours(d.getHours() - (d.getHours() % step));
+    const out = [];
+    while (d.getTime() <= max) {
+      if (d.getTime() >= min) out.push({ value: d.getTime() });
+      d.setHours(d.getHours() + step);
+    }
+    return out;
+  };
+  let out = build(stepH);
+  const minGap = 46;                         // px per label ("00:00" + air)
+  while (width && out.length > 2 && out.length * minGap > width && stepH < 24) {
+    stepH *= 2;
+    out = build(stepH);
   }
   return out;
 }
@@ -1064,7 +1102,7 @@ function baseConfig(fmt, unit) {
         x: {
           type: "linear",
           afterBuildTicks(axis) {
-            const t = fixedTicks(axis.min, axis.max);
+            const t = fixedTicks(axis.min, axis.max, axis.width);
             if (t) axis.ticks = t;
           },
           // Colors are scriptable (re-read each render) so a light/dark theme
@@ -1090,7 +1128,10 @@ function baseConfig(fmt, unit) {
         // swatch already names it, and a title would collide with the labels.
         y2: {
           position: "right", display: "auto",
-          afterFit: (axis) => { axis.width += 42; },
+          // Only while shown: a hidden axis must not keep eating plot width.
+          afterFit: (axis) => {
+            if (axis.getMatchingVisibleMetas().length) axis.width += 42;
+          },
           grid: { drawOnChartArea: false, drawTicks: false },
           border: { display: false },
           ticks: { color: () => css("--muted"), font: { size: 11 }, crossAlign: "far",
@@ -1451,6 +1492,13 @@ function paintThumb(group) {
   th.style.transform = `translateX(${a ? a.offsetLeft : 0}px)`;
 }
 const paintThumbs = () => document.querySelectorAll(".seg, .tabbar").forEach(paintThumb);
+// Re-place the thumbs whenever a control changes size — e.g. the Pods/Average
+// control shrinks when the Outdoor switch appears after the first fetch.
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(() => paintThumbs());
+  window.addEventListener("DOMContentLoaded", () =>
+    document.querySelectorAll(".seg, .tabbar").forEach((g) => ro.observe(g)));
+}
 
 async function refresh() {
   const status = document.getElementById("status");

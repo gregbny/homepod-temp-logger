@@ -142,6 +142,43 @@ Both are covered in [`../homebridge-bridge/README.md`](../homebridge-bridge/READ
 
 ---
 
+## SSH variant (OS 27 hubs)
+
+On **HomePod / tvOS 27** hubs, **Get Contents of URL** fails silently when the Home
+automation runs it (Apple FB23893604): the Shortcut works when you test it on the
+iPhone, the trigger fires, but nothing reaches the server. Workaround: send the same
+JSON with **Run Script over SSH** instead. Set up the Unraid side first:
+[`../ssh-ingest/README.md`](../ssh-ingest/README.md) (steps 1–2), then:
+
+1. **Shortcuts** app → open `HomePod Logger` → add **Run Script over SSH**
+   (**Scripting** category) right after the Text (JSON) action:
+   - **Host**: `SERVER_IP` (e.g. `192.168.1.75`) — **Port**: `22` — **User**: `root`
+   - **Authentication**: **SSH Key** → tap **SSH Key** → keep **ed25519** →
+     **Share Public Key** (or Copy) → send it to yourself and authorize it on Unraid,
+     locked to the script: [`../ssh-ingest/README.md`](../ssh-ingest/README.md) step 3.
+   - **Script**: **insert the Text (JSON) variable** — nothing else in the field.
+     The server never runs it as a command; it's read as the JSON body.
+   - **Input**: leave empty.
+2. **Delete Get Contents of URL** (and the `url` Text/variable if you made one).
+3. Run it (▶). The first run asks to trust the server — approve. The action's output
+   should read `{"status":"ok","received":2,"stored":2}` and the dashboard updates.
+4. **Home automation** → edit it → delete its **Get Contents of URL** → in the
+   Shortcuts app, **long-press the Run Script over SSH action → Copy** → back in the
+   automation editor, **paste** it after the Text (JSON) action. Same trick as B.2:
+   the pasted action keeps its variable reference. **Done**.
+5. Test for real: run the cron once (Homebridge bridge → *Run Script*). A new
+   reading should land; if not, check the Unraid syslog
+   ([troubleshooting table](../ssh-ingest/README.md#troubleshooting)).
+
+> **If the key isn't accepted when the hub runs it** (syslog shows nothing from
+> `homepod-ssh-ingest`, works from the iPhone only): fall back to **Authentication:
+> Password** with the root password, **Script**:
+> `sh /mnt/user/appdata/homepod-temp-logger/ssh-ingest.sh`, and **Input**: the Text
+> (JSON) variable. It works the same, but that password gives a full root shell to
+> anyone who can read the automation — prefer the key.
+
+---
+
 ## Gotchas
 
 - **You can't import a shortcut.** There's no working shareable file; this hand-build
@@ -164,3 +201,5 @@ Both are covered in [`../homebridge-bridge/README.md`](../homebridge-bridge/READ
 - **Server IP changes:** set a **DHCP reservation** so the POST URL stays stable.
 - **HomePod not a hub:** Home app → Home Settings → confirm a HomePod shows as a
   connected hub. Without one, automations don't run autonomously.
+- **Works when tested, never from the trigger (OS 27 hubs):** Get Contents of URL
+  fails silently on the hub — use the [SSH variant](#ssh-variant-os-27-hubs).

@@ -20,10 +20,13 @@
   <Description>HomePod temperature &amp; humidity logger + dashboard (PWA). POST endpoint at /api/readings, dashboard at /.</Description>
 
   <Config Name="WebUI Port" Target="8088" Default="8088" Mode="tcp" Description="Dashboard / API port" Type="Port" Display="always" Required="true" Mask="false">8088</Config>
+  <Config Name="SSH Port" Target="2222" Default="2222" Mode="tcp" Description="Optional SSH ingestion for HomePod/tvOS 27 hubs (the iOS Shortcut sends readings with Run Script over SSH). Not a shell: it only stores readings." Type="Port" Display="always" Required="false" Mask="false">2222</Config>
   <Config Name="Data" Target="/data" Default="/mnt/user/appdata/homepod-temp-logger" Mode="rw" Description="SQLite database (persistent)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/homepod-temp-logger</Config>
   <Config Name="PORT" Target="PORT" Default="8088" Mode="" Description="Listen port inside the container (match the WebUI port)" Type="Variable" Display="advanced" Required="true" Mask="false">8088</Config>
   <Config Name="DB_PATH" Target="DB_PATH" Default="/data/homepod.db" Mode="" Description="SQLite file path inside the container" Type="Variable" Display="advanced" Required="true" Mask="false">/data/homepod.db</Config>
   <Config Name="RETENTION_DAYS" Target="RETENTION_DAYS" Default="0" Mode="" Description="0 = keep everything; N = prune readings older than N days at startup" Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
   <Config Name="WEATHER_LAT" Target="WEATHER_LAT" Default="" Mode="" Description="Optional. Easier: set the location in the dashboard (Outdoor weather card), saved in appdata. If set here (latitude, e.g. 48.86) it overrides the dashboard." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="WEATHER_LON" Target="WEATHER_LON" Default="" Mode="" Description="Optional, with WEATHER_LAT: longitude, e.g. 2.35. Overrides the dashboard setting." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="SSH_PASSWORD" Target="SSH_PASSWORD" Default="" Mode="" Description="Optional password for SSH ingestion. Empty = any login accepted (like the HTTP endpoint)." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="SSH_PORT" Target="SSH_PORT" Default="2222" Mode="" Description="SSH listen port inside the container (match the SSH Port mapping); 0 = off" Type="Variable" Display="advanced" Required="false" Mask="false">2222</Config>
 </Container>

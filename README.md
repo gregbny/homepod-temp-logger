@@ -90,6 +90,8 @@ Short version:
    Map port `8088` and a volume to `/data`. See [`server/README.md`](server/README.md).
 2. **Create the iOS Shortcut** that reads both HomePods and POSTs to
    `http://SERVER_IP:8088/api/readings`. See [`ios-setup/README.md`](ios-setup/README.md).
+   On **OS 27 hubs** that POST fails silently from Home automations — send it over
+   SSH to the container instead: [SSH variant](ios-setup/README.md#ssh-variant-os-27-hubs).
 3. **Add the Homebridge virtual switch + hourly cron.** See
    [`homebridge-bridge/README.md`](homebridge-bridge/README.md).
 4. **Wire the Home app automation** (switch → run Shortcut). Now it's autonomous.

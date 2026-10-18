@@ -451,6 +451,16 @@ def _ssh_server_class():
     import asyncssh
 
     class IngestSSHServer(asyncssh.SSHServer):
+        # Every step is logged: a hub-run Shortcut shows no error anywhere, so
+        # the container log is the only place a failure can be seen.
+        def connection_made(self, conn) -> None:
+            self.peer = (conn.get_extra_info("peername") or ("?",))[0]
+            log.info("ssh: connection from %s", self.peer)
+
+        def connection_lost(self, exc) -> None:
+            if exc:
+                log.warning("ssh: %s disconnected: %s", self.peer, exc)
+
         def begin_auth(self, username: str) -> bool:
             return True  # always run auth, so iOS gets a normal login flow
 
@@ -458,7 +468,10 @@ def _ssh_server_class():
             return True
 
         def validate_password(self, username: str, password: str) -> bool:
-            return not SSH_PASSWORD or hmac.compare_digest(password, SSH_PASSWORD)
+            ok = not SSH_PASSWORD or hmac.compare_digest(password, SSH_PASSWORD)
+            if not ok:
+                log.warning("ssh: %s wrong password (must match SSH_PASSWORD)", self.peer)
+            return ok
 
         # With no password configured, any key is accepted too (the Shortcut's
         # "SSH Key" option); with one, only the password is.
@@ -471,24 +484,51 @@ def _ssh_server_class():
     return IngestSSHServer
 
 
+def _first_json(text: str) -> object:
+    """Decode the JSON object starting at the first '{', ignoring anything
+    around it (a shell prompt, a trailing newline or "exit")."""
+    start = text.find("{")
+    if start < 0:
+        raise json.JSONDecodeError("no JSON object found", text, 0)
+    return json.JSONDecoder().raw_decode(text, start)[0]
+
+
+async def _read_json_from_stdin(process, timeout: float = 10) -> str:
+    """Read stdin until it holds a complete JSON object, EOF, or timeout —
+    a client writing to a shell channel may never send EOF."""
+    buf = ""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while (left := deadline - loop.time()) > 0:
+        try:
+            chunk = await asyncio.wait_for(process.stdin.read(4096), left)
+        except asyncio.TimeoutError:
+            break
+        if not chunk:
+            break
+        buf += chunk
+        try:
+            _first_json(buf)
+            break
+        except json.JSONDecodeError:
+            continue
+    return buf
+
+
 async def _ssh_session(process) -> None:
-    """One SSH exec = one payload. The JSON is the command text (the
-    Shortcut's Script field) or, failing that, stdin (its Input field)."""
+    """One SSH session = one payload. The JSON is the command text (the
+    Shortcut's Script field) or, failing that, stdin (its Input field, or a
+    script written to a shell channel)."""
     body = process.command or ""
     if "{" not in body:
-        if process.command is None:  # interactive login: nothing to do here
-            process.stderr.write("HomePod Logger: send the JSON as the command.\n")
-            process.exit(2)
-            return
-        try:
-            body = await asyncio.wait_for(process.stdin.read(), 10)
-        except asyncio.TimeoutError:
-            body = ""
+        body = await _read_json_from_stdin(process)
     peer = (process.get_extra_info("peername") or ("?",))[0]
     try:
-        result = store_payload(json.loads(body))
+        result = store_payload(_first_json(body))
     except json.JSONDecodeError as exc:
-        error = f"invalid JSON: {exc}"
+        # Show what arrived, so a wrong Script field is obvious in the log.
+        error = (f"invalid JSON: {exc} — command {(process.command or '')[:80]!r}, "
+                 f"stdin {body[:80]!r}")
     except HTTPException as exc:
         error = json.dumps(exc.detail, ensure_ascii=False)
     else:

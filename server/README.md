@@ -94,6 +94,8 @@ service-worker scope covers the whole app.
 | `DB_PATH` | `/data/homepod.db` | SQLite file (inside the volume) |
 | `RETENTION_DAYS` | `0` | `0` = unlimited history; `>0` prunes readings older than N days at startup |
 | `WEATHER_LAT` / `WEATHER_LON` | *(unset)* | optional alternative to the dashboard setting for the outdoor-weather overlay ([Open-Meteo](https://open-meteo.com), hourly, free, no API key). When both are set they override the dashboard (which then shows them read-only). With docker compose, put them in a git-ignored `.env` next to the compose file. With no location at all the server makes **no outbound request** — the app stays 100% local |
+| `SSH_PORT` | `2222` in the image (`0` when run outside Docker) | built-in SSH receiver for OS 27 hubs ([SSH variant](../ios-setup/README.md#ssh-variant-os-27-hubs)); `0` = off. Not a shell: the text received is parsed as a payload and stored, nothing else. Only reachable if you map the port. Its host key is kept in `/data/ssh_host_key` |
+| `SSH_PASSWORD` | *(unset)* | password for the SSH receiver; unset = any login (like the HTTP endpoint) |
 | `WEATHER_REFRESH_S` | `3600` | how often to re-poll Open-Meteo (min 300s). Each poll backfills ~92 past days, so history survives restarts |
 
 ## Run locally (quick test)
@@ -121,6 +123,7 @@ Open `http://127.0.0.1:8088/` — the reading shows up on the charts.
 ```bash
 docker run -d --name homepod-temp-logger \
   -p 8088:8088 \
+  -p 2222:2222 \
   -v /path/to/appdata/homepod-temp-logger:/data \
   ghcr.io/gregbny/homepod-temp-logger:latest
 ```

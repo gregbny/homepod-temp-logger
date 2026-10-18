@@ -147,35 +147,63 @@ Both are covered in [`../homebridge-bridge/README.md`](../homebridge-bridge/READ
 On **HomePod / tvOS 27** hubs, **Get Contents of URL** fails silently when the Home
 automation runs it (Apple FB23893604): the Shortcut works when you test it on the
 iPhone, the trigger fires, but nothing reaches the server. Workaround: send the same
-JSON with **Run Script over SSH** instead. Set up the Unraid side first:
-[`../ssh-ingest/README.md`](../ssh-ingest/README.md) (steps 1–2), then:
+JSON with **Run Script over SSH** instead — to the logger container itself, which
+has a built-in SSH receiver on port `2222`.
+
+That receiver is **not a real SSH server**: no shell, no commands, no file access.
+Whatever text it receives is parsed as the JSON payload and stored, exactly like
+`POST /api/readings` — nothing else is possible through it. Nothing is installed or
+opened on Unraid itself.
+
+### Server side (once)
+
+Update the container to the latest image, then map the port: Unraid → **Docker** →
+`homepod-temp-logger` → **Edit** → *Add another Path, Port, Variable…* →
+**Config Type: Port**, **Container Port `2222`**, **Host Port `2222`**, TCP →
+**Apply**. (A fresh install from the template already has it.) The container log
+then shows `ssh: ingestion listening on port 2222`.
+
+Optional: add a **Variable** `SSH_PASSWORD` to require a password. Left unset, any
+login is accepted — the same as the HTTP endpoint, which has no password either.
+
+### Shortcut side
 
 1. **Shortcuts** app → open `HomePod Logger` → add **Run Script over SSH**
    (**Scripting** category) right after the Text (JSON) action:
-   - **Host**: `SERVER_IP` (e.g. `192.168.1.75`) — **Port**: `22` — **User**: `root`
-   - **Authentication**: **SSH Key** → tap **SSH Key** → keep **ed25519** →
-     **Share Public Key** (or Copy) → send it to yourself and authorize it on Unraid,
-     locked to the script: [`../ssh-ingest/README.md`](../ssh-ingest/README.md) step 3.
+   - **Host**: `SERVER_IP` (e.g. `192.168.1.75`) — **Port**: `2222`
+   - **User**: anything (e.g. `homepod`)
+   - **Authentication**: **Password** → your `SSH_PASSWORD`, or anything if you
+     didn't set one.
    - **Script**: **insert the Text (JSON) variable** — nothing else in the field.
-     The server never runs it as a command; it's read as the JSON body.
+     It's never run as a command; it's read as the JSON.
    - **Input**: leave empty.
 2. **Delete Get Contents of URL** (and the `url` Text/variable if you made one).
 3. Run it (▶). The first run asks to trust the server — approve. The action's output
-   should read `{"status":"ok","received":2,"stored":2}` and the dashboard updates.
+   should read `{"status": "ok", "received": 2, "stored": 2}` and the dashboard
+   updates.
 4. **Home automation** → edit it → delete its **Get Contents of URL** → in the
    Shortcuts app, **long-press the Run Script over SSH action → Copy** → back in the
    automation editor, **paste** it after the Text (JSON) action. Same trick as B.2:
    the pasted action keeps its variable reference. **Done**.
 5. Test for real: run the cron once (Homebridge bridge → *Run Script*). A new
-   reading should land; if not, check the Unraid syslog
-   ([troubleshooting table](../ssh-ingest/README.md#troubleshooting)).
+   reading should land.
 
-> **If the key isn't accepted when the hub runs it** (syslog shows nothing from
-> `homepod-ssh-ingest`, works from the iPhone only): fall back to **Authentication:
-> Password** with the root password, **Script**:
-> `sh /mnt/user/appdata/homepod-temp-logger/ssh-ingest.sh`, and **Input**: the Text
-> (JSON) variable. It works the same, but that password gives a full root shell to
-> anyone who can read the automation — prefer the key.
+### If nothing arrives
+
+Check the container log (Unraid → Docker → `homepod-temp-logger` → **Logs**):
+
+| Log line | Meaning |
+|---|---|
+| `ssh: … stored 2 reading(s)` | it works |
+| `ssh: … rejected: invalid JSON …` | the Script field doesn't hold the JSON — the variable didn't survive the paste; re-copy the action |
+| `ssh: … rejected: [… out of range …]` | the JSON arrived but a value is wrong; the detail says which |
+| no `ssh:` line at all | the connection never reached the container: port `2222` not mapped, wrong IP/port, or wrong password |
+
+You can also test from any computer: `ssh -p 2222 homepod@SERVER_IP
+'{"homepod":"test","temp":"21,4°C","humidity":"50 %"}'` should print `"stored": 1`.
+
+Once Apple fixes the hub bug (expected in 27.2) you can go back to **Get Contents of
+URL**, or keep SSH — both feed the same database.
 
 ---
 

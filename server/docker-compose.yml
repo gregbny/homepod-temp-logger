@@ -7,12 +7,15 @@ services:
     restart: unless-stopped
     ports:
       - "8088:8088"          # host:container — the POST URL is http://SERVER_IP:8088
+      - "2222:2222"          # optional SSH ingestion (OS 27 hubs workaround)
     volumes:
       - ./data:/data         # .db persistence (on Unraid: /mnt/user/appdata/homepod-temp-logger)
     environment:
       PORT: "8088"
       DB_PATH: "/data/homepod.db"
       RETENTION_DAYS: "0"    # 0 = unlimited history; e.g. 365 to prune beyond a year
+      SSH_PORT: "2222"       # SSH ingestion; "0" = off. Not a shell: it only stores readings
+      SSH_PASSWORD: "${SSH_PASSWORD:-}"  # empty = any login (like the HTTP endpoint)
       # Optional outdoor weather (Open-Meteo, free, no API key) drawn behind the
       # indoor curves. Easiest: set the location in the dashboard ("Outdoor
       # weather" card) — it's saved in ./data and survives updates. To pin it

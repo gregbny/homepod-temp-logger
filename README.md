@@ -74,7 +74,6 @@ by Homebridge that the server flips once per hour:
 | [`server/`](server/README.md) | Ingestion API + dashboard (live tiles, charts, PWA) | Python (FastAPI) + SQLite, Docker |
 | [`homebridge-bridge/`](homebridge-bridge/README.md) | Virtual switch + hourly trigger script | homebridge-dummy + Python (stdlib) |
 | [`ios-setup/`](ios-setup/README.md) | Step-by-step Apple setup (Shortcut + Home automation) | — (manual) |
-| [`ssh-ingest/`](ssh-ingest/README.md) | Receive readings over SSH — workaround for OS 27 hubs | sh + curl |
 | [`unraid/`](unraid/) | One-click Unraid "Add Container" template | XML |
 
 ## Quick start
@@ -92,7 +91,7 @@ Short version:
 2. **Create the iOS Shortcut** that reads both HomePods and POSTs to
    `http://SERVER_IP:8088/api/readings`. See [`ios-setup/README.md`](ios-setup/README.md).
    On **OS 27 hubs** that POST fails silently from Home automations — send it over
-   SSH instead: [`ssh-ingest/README.md`](ssh-ingest/README.md).
+   SSH to the container instead: [SSH variant](ios-setup/README.md#ssh-variant-os-27-hubs).
 3. **Add the Homebridge virtual switch + hourly cron.** See
    [`homebridge-bridge/README.md`](homebridge-bridge/README.md).
 4. **Wire the Home app automation** (switch → run Shortcut). Now it's autonomous.

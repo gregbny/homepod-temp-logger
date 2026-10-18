@@ -20,6 +20,7 @@ such values quoted, since a bare comma is invalid JSON.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -79,6 +80,18 @@ def _opt_float(name: str) -> tuple[Optional[float], str]:
 ENV_LOCATION = _ENV_LAT is not None and _ENV_LON is not None
 # How often to re-poll Open-Meteo (seconds). One call backfills ~92 past days.
 WEATHER_REFRESH_S = int(os.environ.get("WEATHER_REFRESH_S", "3600"))
+
+# Optional SSH ingestion (0 = off). Workaround for HomePod / tvOS 27 hubs, where
+# "Get Contents of URL" fails silently inside Home automations: the Shortcut
+# sends the same JSON with "Run Script over SSH" instead. This is not a real
+# SSH server — no shell, no commands: the text received is only ever parsed
+# as a payload and stored, exactly like POST /api/readings.
+SSH_PORT = int(os.environ.get("SSH_PORT", "0") or 0)
+# Empty = accept any login, like the unauthenticated HTTP endpoint.
+SSH_PASSWORD = os.environ.get("SSH_PASSWORD", "")
+# Persisted next to the database so iOS doesn't see a new host key after an
+# image update.
+SSH_HOST_KEY = os.path.join(os.path.dirname(DB_PATH) or ".", "ssh_host_key")
 
 # "Plausible" validation bounds.
 TEMP_MIN, TEMP_MAX = -40.0, 80.0
@@ -166,6 +179,8 @@ async def _startup() -> None:
     # Always running: it idles while no location is set and wakes up as soon
     # as one is saved from the dashboard.
     asyncio.create_task(_weather_loop())
+    if SSH_PORT:
+        await start_ssh()
 
 
 def prune_old() -> None:
@@ -378,6 +393,13 @@ def normalize_ts(raw: Optional[str]) -> str:
 # --------------------------------------------------------------------------- #
 @app.post("/api/readings")
 async def ingest(payload: dict) -> JSONResponse:
+    return JSONResponse(store_payload(payload))
+
+
+def store_payload(payload: object) -> dict:
+    """Validate and store a payload (HTTP or SSH). Raises HTTPException(400)."""
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="expected a JSON object")
     # Accept either a single reading or { "readings": [...] }.
     if "readings" in payload:
         raw_items = payload["readings"]
@@ -418,7 +440,83 @@ async def ingest(payload: dict) -> JSONResponse:
             )
             stored += 1 if cur.rowcount else 0
 
-    return JSONResponse({"status": "ok", "received": len(readings), "stored": stored})
+    return {"status": "ok", "received": len(readings), "stored": stored}
+
+
+# --------------------------------------------------------------------------- #
+# SSH ingestion (optional, SSH_PORT)
+# --------------------------------------------------------------------------- #
+# Imported lazily: the HTTP-only setup never needs it.
+def _ssh_server_class():
+    import asyncssh
+
+    class IngestSSHServer(asyncssh.SSHServer):
+        def begin_auth(self, username: str) -> bool:
+            return True  # always run auth, so iOS gets a normal login flow
+
+        def password_auth_supported(self) -> bool:
+            return True
+
+        def validate_password(self, username: str, password: str) -> bool:
+            return not SSH_PASSWORD or hmac.compare_digest(password, SSH_PASSWORD)
+
+        # With no password configured, any key is accepted too (the Shortcut's
+        # "SSH Key" option); with one, only the password is.
+        def public_key_auth_supported(self) -> bool:
+            return not SSH_PASSWORD
+
+        def validate_public_key(self, username: str, key) -> bool:
+            return True
+
+    return IngestSSHServer
+
+
+async def _ssh_session(process) -> None:
+    """One SSH exec = one payload. The JSON is the command text (the
+    Shortcut's Script field) or, failing that, stdin (its Input field)."""
+    body = process.command or ""
+    if "{" not in body:
+        if process.command is None:  # interactive login: nothing to do here
+            process.stderr.write("HomePod Logger: send the JSON as the command.\n")
+            process.exit(2)
+            return
+        try:
+            body = await asyncio.wait_for(process.stdin.read(), 10)
+        except asyncio.TimeoutError:
+            body = ""
+    peer = (process.get_extra_info("peername") or ("?",))[0]
+    try:
+        result = store_payload(json.loads(body))
+    except json.JSONDecodeError as exc:
+        error = f"invalid JSON: {exc}"
+    except HTTPException as exc:
+        error = json.dumps(exc.detail, ensure_ascii=False)
+    else:
+        log.info("ssh: %s stored %d reading(s)", peer, result["stored"])
+        process.stdout.write(json.dumps(result) + "\n")
+        process.exit(0)
+        return
+    log.warning("ssh: %s rejected: %s", peer, error)
+    process.stderr.write(error + "\n")
+    process.exit(1)
+
+
+async def start_ssh() -> None:
+    import asyncssh
+
+    if os.path.exists(SSH_HOST_KEY):
+        key = asyncssh.read_private_key(SSH_HOST_KEY)
+    else:
+        key = asyncssh.generate_private_key("ssh-ed25519")
+        key.write_private_key(SSH_HOST_KEY)
+        os.chmod(SSH_HOST_KEY, 0o600)
+    await asyncssh.create_server(
+        _ssh_server_class(), "", SSH_PORT,
+        server_host_keys=[key], process_factory=_ssh_session,
+    )
+    log.info("ssh: ingestion listening on port %d (%s), host key %s",
+             SSH_PORT, "password" if SSH_PASSWORD else "any login",
+             key.get_fingerprint())
 
 
 # --------------------------------------------------------------------------- #

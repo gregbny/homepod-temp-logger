@@ -195,9 +195,11 @@ Check the container log (Unraid → Docker → `homepod-temp-logger` → **Logs*
 | Log line | Meaning |
 |---|---|
 | `ssh: … stored 2 reading(s)` | it works |
-| `ssh: … rejected: invalid JSON …` | the Script field doesn't hold the JSON — the variable didn't survive the paste; re-copy the action |
+| `ssh: … wrong password` | the Shortcut's password doesn't match `SSH_PASSWORD` |
+| `ssh: … rejected: invalid JSON … command '…', stdin '…'` | the JSON didn't arrive as expected; the log shows what did (an SSH app such as Termius probing for a shell lands here too — that's expected) |
 | `ssh: … rejected: [… out of range …]` | the JSON arrived but a value is wrong; the detail says which |
-| no `ssh:` line at all | the connection never reached the container: port `2222` not mapped, wrong IP/port, or wrong password |
+| `ssh: connection from …` and nothing after | the client gave up during login — check the password and user |
+| no `ssh:` line at all | the connection never reached the container: port `2222` not mapped, wrong IP/port |
 
 You can also test from any computer: `ssh -p 2222 homepod@SERVER_IP
 '{"homepod":"test","temp":"21,4°C","humidity":"50 %"}'` should print `"stored": 1`.
